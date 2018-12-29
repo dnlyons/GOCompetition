@@ -51,7 +51,7 @@ RUN_OPF = 1         # 0=normal powerflow, 1=optimal powerflow
 # -- FUNCTIONS ----------------------------------------------------------------
 # =============================================================================
 def get_raw_csvdata(fname):
-    with open(fname, 'rU') as fobject:
+    with open(fname, 'r') as fobject:
         reader = csv.reader(fobject, delimiter=',', quotechar="'")
         for row in reader:
             row = [x.strip() for x in row]
