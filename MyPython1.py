@@ -1,4 +1,3 @@
-####!python3
 import os
 import sys
 import csv
@@ -10,18 +9,6 @@ import pandapower as pp
 from pandas import options as pdoptions
 
 cwd = os.path.dirname(__file__)
-
-# -- USING .INI FILE ----------------------------------------------------------
-# from configparser import ConfigParser
-# if not sys.argv[1:]:
-#     config = ConfigParser()
-#     config.read(os.path.join(cwd, 'sandbox', 'inputfiles.ini'))
-#     rop_fname = cwd + config.get('INPUTS', 'ROP')
-#     raw_fname = cwd + config.get('INPUTS', 'RAW')
-#     con_fname = cwd + config.get('INPUTS', 'CON')
-#     inl_fname = cwd + config.get('INPUTS', 'INL')
-#     outfname1 = cwd + r'/sandbox/scenario_1/solution1.txt'
-#     outfname2 = cwd + r'/sandbox/scenario_1/solution2.txt'
 
 # -- DEVELOPMENT DEFAULT ------------------------------------------------------
 if not sys.argv[1:]:
@@ -39,8 +26,8 @@ if sys.argv[1:]:
     inl_fname = sys.argv[2]
     raw_fname = sys.argv[3]
     rop_fname = sys.argv[4]
-    outfname1 = cwd + r'/solution1.txt'
-    outfname2 = cwd + r'/solution2.txt'
+    outfname1 = 'solution1.txt'
+    outfname2 = 'solution2.txt'
 
 
 CONRATING = 2       # contingency line and xfmr ratings 0=RateA, 1=RateB, 2=RateC
@@ -62,7 +49,7 @@ def get_raw_csvdata(fname):
 
 
 def get_con_csvdata(fname):
-    with open(fname, 'rU') as fobject:
+    with open(fname, 'r') as fobject:
         reader = csv.reader(fobject, delimiter=' ', quotechar="'", skipinitialspace=True)
         for row in reader:
             row = [x.strip() for x in row]
@@ -72,7 +59,7 @@ def get_con_csvdata(fname):
 
 
 def get_reserve_csvdata(fname):
-    with open(fname, 'rU') as fobject:
+    with open(fname, 'r') as fobject:
         reader = csv.reader(fobject, delimiter=',', quotechar="'", skipinitialspace=True)
         for row in reader:
             row = [x.strip() for x in row]
@@ -383,19 +370,19 @@ def write_base_bus_results(fname, b_results, f_dict, s_dict, g_results, sh_resul
     buslist = [b_results.columns.values.tolist()] + b_results.values.tolist()
     # -- GET ANY SHUNT MVARS FOR REPORTING ------------------------------------
     # -- (SWITCHED SHUNTS ARE MODELED AS GENERATORS) --------------------------
-    #for j in range(1, len(buslist)):
-    #    buslist[j][0] = int(buslist[j][0])
-    #    bus = buslist[j][0]
-    #    mvars = 0.0
-    #    if bus in f_dict:
-    #        mvars = -1e-3 * sh_results.loc[f_dict[bus], 'q_kvar']
-    #    if bus in s_dict:
-    #        mvars = -1e-3 * g_results.loc[s_dict[bus], 'q_kvar']
-    #    if bus in f_dict and bus in s_dict:
-    #        mvars1 = -1e-3 * sh_results.loc[f_dict[bus], 'q_kvar']
-    #        mvars2 = -1e-3 * g_results.loc[s_dict[bus], 'q_kvar']
-    #        mvars = mvars1 + mvars2
-    #    buslist[j][3] = mvars + 0.0
+    for j in range(1, len(buslist)):
+        buslist[j][0] = int(buslist[j][0])
+        bus = buslist[j][0]
+        mvars = 0.0
+        #if bus in f_dict:
+        #    mvars = -1e-3 * sh_results.loc[f_dict[bus], 'q_kvar']
+        #if bus in s_dict:
+        #    mvars = -1e-3 * g_results.loc[s_dict[bus], 'q_kvar']
+        #if bus in f_dict and bus in s_dict:
+        #    mvars1 = -1e-3 * sh_results.loc[f_dict[bus], 'q_kvar']
+        #    mvars2 = -1e-3 * g_results.loc[s_dict[bus], 'q_kvar']
+        #    mvars = mvars1 + mvars2
+        buslist[j][3] = mvars + 0.0
     # -- WRITE THE BUS RESULTS TO FILE ----------------------------------------
     write_csvdata(fname, buslist, [['--bus section']])
     return b_results
@@ -468,14 +455,14 @@ def write_bus_results(fname, b_results, f_dict, s_dict, g_results, sh_results, c
         buslist[j][0] = int(buslist[j][0])
         bus = buslist[j][0]
         mvars = 0.0
-        if bus in f_dict:
-            mvars = -1e-3 * sh_results.loc[f_dict[bus], 'q_kvar']
-        if bus in s_dict:
-            mvars = -1e-3 * g_results.loc[s_dict[bus], 'q_kvar']
-        if bus in f_dict and bus in s_dict:
-            mvars1 = -1e-3 * sh_results.loc[f_dict[bus], 'q_kvar']
-            mvars2 = -1e-3 * g_results.loc[s_dict[bus], 'q_kvar']
-            mvars = mvars1 + mvars2
+        #if bus in f_dict:
+        #    mvars = -1e-3 * sh_results.loc[f_dict[bus], 'q_kvar']
+        #if bus in s_dict:
+        #    mvars = -1e-3 * g_results.loc[s_dict[bus], 'q_kvar']
+        #if bus in f_dict and bus in s_dict:
+        #    mvars1 = -1e-3 * sh_results.loc[f_dict[bus], 'q_kvar']
+        #    mvars2 = -1e-3 * g_results.loc[s_dict[bus], 'q_kvar']
+        #    mvars = mvars1 + mvars2
         buslist[j][3] = mvars + 0.0
     # -- WRITE THE BUS RESULTS TO FILE ----------------------------------------
     write_csvdata(fname, [], [['--contingency'], ['label'], [clabel]])
@@ -996,7 +983,6 @@ if __name__ == "__main__":
 
     pp.runpp(net, init='auto', max_iteration=ITMXN, calculate_voltage_angles=True, enforce_q_lims=True)
 
-    RUN_OPF = 1
     # =========================================================================
     # -- PROCESS BASECASE POWER FLOW ------------------------------------------
     # =========================================================================
@@ -1113,8 +1099,6 @@ if __name__ == "__main__":
         # =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
         # -- PROCESS OPF CONTINGENCIES ----------------------------------------
         # =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
-        # print(greservedict)
-
         start_time = time.time()
         if outagedict['gen']:
             print('RUNNING OPF GENERATOR OUTAGES ......................................')
@@ -1170,7 +1154,7 @@ if __name__ == "__main__":
 
     print('DONE WITH OPF CONTINGENCIES ........................................', round(time.time() - start_time, 1))
 
-    print()
+    # -- GET LAST OUTAGE GENERATOR COST ---------------------------------------
     total_cost = 0.0
     gidxs = gendict.keys()
     gbuses = net.gen['bus'].values
@@ -1185,7 +1169,6 @@ if __name__ == "__main__":
         c = [x[1] for x in pcostdata]
         cost = numpy.interp(pgen, p, c)
         total_cost += cost
-
     print()
-    print('TOTAL COST =',total_cost)
+    print('TOTAL COST =', round(total_cost, 2))
 
