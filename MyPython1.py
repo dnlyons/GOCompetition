@@ -25,22 +25,22 @@ cwd = os.path.dirname(__file__)
 
 # -- DEVELOPMENT DEFAULT ------------------------------------------------------
 if not sys.argv[1:]:
-    rop_fname = cwd + r'/sandbox/scenario_1/case.con'
-    raw_fname = cwd + r'/sandbox/scenario_1/case.inl'
-    con_fname = cwd + r'/sandbox/scenario_1/case.raw'
-    inl_fname = cwd + r'/sandbox/scenario_1/case.rop'
+    con_fname = cwd + r'/sandbox/scenario_1/case.con'
+    inl_fname = cwd + r'/sandbox/scenario_1/case.inl'
+    raw_fname = cwd + r'/sandbox/scenario_1/case.raw'
+    rop_fname = cwd + r'/sandbox/scenario_1/case.rop'
     outfname1 = cwd + r'/sandbox/scenario_1/solution1.txt'
     outfname2 = cwd + r'/sandbox/scenario_1/solution2.txt'
 
 # -- USING COMMAND LINE -------------------------------------------------------
 if sys.argv[1:]:
     print()
-    raw_fname = sys.argv[1]
-    rop_fname = sys.argv[2]
-    con_fname = sys.argv[3]
-    inl_fname = sys.argv[4]
-    outfname1 = cwd + r'/solution1.txt'
-    outfname2 = cwd + r'/solution1.txt'
+    con_fname = sys.argv[1]
+    inl_fname = sys.argv[2]
+    raw_fname = sys.argv[3]
+    rop_fname = sys.argv[4]
+    outfname1 = 'solution1.txt'
+    outfname2 = 'solution2.txt'
 
 
 CONRATING = 2       # contingency line and xfmr ratings 0=RateA, 1=RateB, 2=RateC
