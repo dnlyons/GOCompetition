@@ -1,3 +1,4 @@
+####!python3
 import os
 import sys
 import csv
@@ -24,10 +25,10 @@ cwd = os.path.dirname(__file__)
 
 # -- DEVELOPMENT DEFAULT ------------------------------------------------------
 if not sys.argv[1:]:
-    rop_fname = cwd + r'/sandbox/scenario_1/case.rop'
-    raw_fname = cwd + r'/sandbox/scenario_1/case.raw'
-    con_fname = cwd + r'/sandbox/scenario_1/case.con'
-    inl_fname = cwd + r'/sandbox/scenario_1/case.inl'
+    rop_fname = cwd + r'/sandbox/scenario_1/case.con'
+    raw_fname = cwd + r'/sandbox/scenario_1/case.inl'
+    con_fname = cwd + r'/sandbox/scenario_1/case.raw'
+    inl_fname = cwd + r'/sandbox/scenario_1/case.rop'
     outfname1 = cwd + r'/sandbox/scenario_1/solution1.txt'
     outfname2 = cwd + r'/sandbox/scenario_1/solution2.txt'
 
@@ -38,8 +39,8 @@ if sys.argv[1:]:
     rop_fname = sys.argv[2]
     con_fname = sys.argv[3]
     inl_fname = sys.argv[4]
-    outfname1 = sys.argv[5]
-    outfname2 = sys.argv[6]
+    outfname1 = cwd + r'/solution1.txt'
+    outfname2 = cwd + r'/solution1.txt'
 
 
 CONRATING = 2       # contingency line and xfmr ratings 0=RateA, 1=RateB, 2=RateC
@@ -626,17 +627,10 @@ if __name__ == "__main__":
                    raw_mtdclinedata, raw_mslinedata, raw_zonedata, raw_areaxferdata, raw_ownerdata, raw_factsdata, raw_swshuntdata, raw_gnedata, raw_machinedata]
     dataobj = get_raw_csvdata(raw_fname)
     line = next(dataobj)
-    print('is this a blank line?', line)
-
     mva_base = float(line[1])
     basefreq = float(line[5][:4])
-
     line = next(dataobj)
-    print('is this a blank line?', line)
-
     line = next(dataobj)
-    print('is this a blank line?', line)
-
     for record in raw_rawdata:
         if line[0].startswith('Q'):
             break
@@ -826,8 +820,6 @@ if __name__ == "__main__":
                 genbuses.append(genbus)
                 gids.append("'" + gid + "'")
 
-            # TODO --- save greserve in dict for contingency analysis... pmin = pbase - greserve
-
     # == ADD FIXED SHUNT DATA TO NETWORK ======================================
     # fixshunt = ['I', 'ID', 'STATUS', 'GL', 'BL']
     fx_dict = {}
@@ -984,17 +976,6 @@ if __name__ == "__main__":
                        min_q_kvar=-1e9, max_q_kvar=0.0, index=ext_grid_bus)
     pp.create_polynomial_cost(net, ext_grid_bus, 'ext_grid', numpy.array([-1, 0]), type='p')
 
-    # pp.create_ext_grid(net, ext_grid_bus, vm_pu=swing_vreg, va_degree=swing_angle, in_service=True, min_p_kw=-1, max_p_kw=1,
-    #                    min_q_kvar=-1, max_q_kvar=1, index=ext_grid_bus)
-    # pp.create_ext_grid(net, ext_grid_bus, vm_pu=swing_vreg, va_degree=swing_angle, in_service=True, min_p_kw=-1e12, max_p_kw=1e12, min_q_kvar=-1e12, max_q_kvar=1e12,
-    #                    index=ext_grid_bus)
-    # pp.create_ext_grid(net, ext_grid_bus, vm_pu=swing_vreg, va_degree=swing_angle, in_service=True, index=ext_grid_bus)
-    # pp.create_polynomial_cost(net, ext_grid_bus, 'ext_grid', numpy.array([-1, 0]), type='p')
-    # pp.create_polynomial_cost(net, ext_grid_bus, 'ext_grid', numpy.array([-1, 0]), type='q')
-    # pp.create_polynomial_cost(net, ext_grid_bus, 'ext_grid', numpy.array([-1, 0]), type='p')
-    # pp.create_polynomial_cost(net, ext_grid_bus, 'ext_grid', numpy.array([-1e-12, 0]), type='p')
-    # pp.create_polynomial_cost(net, ext_grid_bus, 'ext_grid', numpy.array([-1, 0]), type='q')
-
     print('--------------------------------------------------------------------')
     # -- DONE CREATING NETWORK ------------------------------------------------
 
@@ -1009,6 +990,11 @@ if __name__ == "__main__":
         os.remove(outfname2)
     except FileNotFoundError:
         pass
+
+    # -- RUN STRAIGHT POWER FLOW SOLUTION -------------------------------------
+    print('SOLVING NETWORK ....................................................')
+
+    pp.runpp(net, init='auto', max_iteration=ITMXN, calculate_voltage_angles=True, enforce_q_lims=True)
 
     RUN_OPF = 1
     # =========================================================================
@@ -1179,7 +1165,4 @@ if __name__ == "__main__":
             bus_results = write_bus_results(outfname2, bus_results, fx_dict, sw_dict, gen_results, shunt_results, conlabel, ext_grid_bus)
             gen_results, pgens = write_gen_results(outfname2, gen_results, gids, genbuses, base_pgens, extgrid_results, swingbus, ext_grid_bus)
 
-        print('DONE WITH OPF CONTINGENCIES ........................................', round(time.time() - start_time, 1))
-        print()
-        print('GENERATOR RESERVES')
-        print(greservedict)
+    print('DONE WITH OPF CONTINGENCIES ........................................', round(time.time() - start_time, 1))
