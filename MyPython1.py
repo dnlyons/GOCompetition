@@ -324,16 +324,16 @@ def get_swingbus_data(lol):
 
 
 def get_swing_gen_data(lol, swbus):
-    # gens = ['I', 'ID', 'PG', 'QG', 'QT', 'QB', 'VS', 'IREG', 'MBASE', 'ZR', 'ZX', 'RT', 'XT', 'GTAP', 'STAT', 'RMPCT', 'PT', 'PB',
+    # gens = ['I', 'ID', '-PG', '-QG', 'QT', 'QB', 'VS', 'IREG', 'MBASE', 'ZR', 'ZX', 'RT', 'XT', 'GTAP', 'STAT', 'RMPCT', '-PT', '-PB',
     #         'O1', 'F1', 'O2', 'F2', 'O3', 'F3', 'O4', 'F4', 'WMOD', 'WPF']
     for i in lol:
         if i[0] == swbus:
             sw_key = str(i[0]) + '-' + i[1]
-            sw_qmin = -1e3 * i[4]
-            sw_qmax = -1e3 * i[5]
+            sw_qmin = i[4]
+            sw_qmax = i[5]
             vreg_sw = i[6]
-            sw_pmin = -1e3 * i[16]
-            sw_pmax = -1e3 * i[17]
+            sw_pmin = i[16]
+            sw_pmax =i[17]
             break
     return sw_key, vreg_sw, sw_qmin, sw_qmax, sw_pmin, sw_pmax
 
@@ -626,10 +626,17 @@ if __name__ == "__main__":
                    raw_mtdclinedata, raw_mslinedata, raw_zonedata, raw_areaxferdata, raw_ownerdata, raw_factsdata, raw_swshuntdata, raw_gnedata, raw_machinedata]
     dataobj = get_raw_csvdata(raw_fname)
     line = next(dataobj)
+    print('is this a blank line?', line)
+
     mva_base = float(line[1])
     basefreq = float(line[5][:4])
-    x = next(dataobj)
+
     line = next(dataobj)
+    print('is this a blank line?', line)
+
+    line = next(dataobj)
+    print('is this a blank line?', line)
+
     for record in raw_rawdata:
         if line[0].startswith('Q'):
             break
@@ -736,17 +743,9 @@ if __name__ == "__main__":
     greservedata = get_gen_reserves(inl_fname)
     # =========================================================================
 
-    # print('PARTICIPATING GENERATORS MAPPED TO PMAX-PMIN-COSTCURVE TABLES')
-    # for j in genopfdict:
-    #     print(j, genopfdict[j])
-    # print('PMAX-PMIN-COSTCURVE TABLES')
-    # for j in gdispdict:
-    #     print(j, gdispdict[j])
-    # print('PWL COST-CURVE TABLES')
-    # for j in pwlcostdata:
-    #     print(j, pwlcostdata[j])
-
+    # =========================================================================
     # == CREATE NETWORK =======================================================
+    # =========================================================================
     print('------------------------- CREATING NETWORK -------------------------')
     kva_base = 1000 * mva_base
     net = pp.create_empty_network('net', basefreq, kva_base)
@@ -810,8 +809,8 @@ if __name__ == "__main__":
                 if genkey in greservedata:
                     greserve = greservedata[genkey]
 
-                    idx = pp.create_gen(net, genbus, pgen, vm_pu=vreg, name=gid, min_p_kw=pmin, max_p_kw=pmax,
-                                        scaling=1.0, controllable=False, in_service=status, index=genbus)
+                    idx = pp.create_gen(net, genbus, pgen, vm_pu=vreg, name=gid, min_p_kw=pmin, max_p_kw=pmax, min_q_kvar=qmin, max_q_kvar=qmax,
+                                        scaling=1.0, controllable=True, in_service=status, index=genbus)
                     pp.create_piecewise_linear_cost(net, idx, 'gen', pcostdata, type='p')
 
                     gendict.update({genkey: idx})
@@ -824,7 +823,6 @@ if __name__ == "__main__":
                                     scaling=1.0, controllable=False, in_service=status, index=genbus)
                 gendict.update({genkey: idx})
                 genreg.update({genbus: vreg})
-                greservedict.update({genbus: pmin})
                 genbuses.append(genbus)
                 gids.append("'" + gid + "'")
 
@@ -979,20 +977,24 @@ if __name__ == "__main__":
 
     # == ADD EXTERNAL GRID (PARALLEL TO SWING BUS) ============================
     ext_grid_bus = pp.create_bus(net, vn_kv=swing_kv, name='Ex_Grid_Bus', in_service=True, max_vm_pu=swing_vhigh, min_vm_pu=swing_vlow)
-    ext_tie_rating = 1e6/(math.sqrt(3) * swing_kv)
+    ext_tie_rating = 1e9/(math.sqrt(3) * swing_kv)
     tie_index = int(str(swingbus) + str(ext_grid_bus))
     pp.create_line_from_parameters(net,  swingbus, ext_grid_bus, 1.0, 0.0, 0.002, 0.0, ext_tie_rating, name='Swing-Tie', in_service=True, df=1.0, index=tie_index)
-    pp.create_ext_grid(net, ext_grid_bus, vm_pu=swing_vreg, va_degree=swing_angle, in_service=True, min_p_kw=-1, max_p_kw=1,
-                       min_q_kvar=-1, max_q_kvar=1, index=ext_grid_bus)
-    # pp.create_ext_grid(net, ext_grid_bus, vm_pu=swing_vreg, va_degree=swing_angle, in_service=True, min_p_kw=-1e9, max_p_kw=1e9, min_q_kvar=-1e9, max_q_kvar=1e9,
-    #                    index=ext_grid_bus)
-    # pp.create_ext_grid(net, ext_grid_bus, vm_pu=swing_vreg, va_degree=swing_angle, in_service=True, min_p_kw=swing_pmin, max_p_kw=swing_pmax,
-    #                    min_q_kvar=swing_qmin, max_q_kvar=swing_qmax, index=ext_grid_bus)
-    # pp.create_ext_grid(net, ext_grid_bus, vm_pu=swing_vreg, va_degree=swing_angle, in_service=True, index=ext_grid_bus)
+    pp.create_ext_grid(net, ext_grid_bus, vm_pu=swing_vreg, va_degree=swing_angle, in_service=True, min_p_kw=-1e9, max_p_kw=0.0,
+                       min_q_kvar=-1e9, max_q_kvar=0.0, index=ext_grid_bus)
+    pp.create_polynomial_cost(net, ext_grid_bus, 'ext_grid', numpy.array([-1, 0]), type='p')
 
-    # pp.create_polynomial_cost(net, ext_grid_bus, 'ext_grid', numpy.array([-0.0008, 0]), type='p')
-    # pp.create_polynomial_cost(net, ext_grid_bus, 'ext_grid', numpy.array([-0.0008, 0]), type='q')
+    # pp.create_ext_grid(net, ext_grid_bus, vm_pu=swing_vreg, va_degree=swing_angle, in_service=True, min_p_kw=-1, max_p_kw=1,
+    #                    min_q_kvar=-1, max_q_kvar=1, index=ext_grid_bus)
+    # pp.create_ext_grid(net, ext_grid_bus, vm_pu=swing_vreg, va_degree=swing_angle, in_service=True, min_p_kw=-1e12, max_p_kw=1e12, min_q_kvar=-1e12, max_q_kvar=1e12,
+    #                    index=ext_grid_bus)
+    # pp.create_ext_grid(net, ext_grid_bus, vm_pu=swing_vreg, va_degree=swing_angle, in_service=True, index=ext_grid_bus)
     # pp.create_polynomial_cost(net, ext_grid_bus, 'ext_grid', numpy.array([-1, 0]), type='p')
+    # pp.create_polynomial_cost(net, ext_grid_bus, 'ext_grid', numpy.array([-1, 0]), type='q')
+    # pp.create_polynomial_cost(net, ext_grid_bus, 'ext_grid', numpy.array([-1, 0]), type='p')
+    # pp.create_polynomial_cost(net, ext_grid_bus, 'ext_grid', numpy.array([-1e-12, 0]), type='p')
+    # pp.create_polynomial_cost(net, ext_grid_bus, 'ext_grid', numpy.array([-1, 0]), type='q')
+
     print('--------------------------------------------------------------------')
     # -- DONE CREATING NETWORK ------------------------------------------------
 
@@ -1008,7 +1010,7 @@ if __name__ == "__main__":
     except FileNotFoundError:
         pass
 
-    # RUN_OPF = 0
+    RUN_OPF = 1
     # =========================================================================
     # -- PROCESS BASECASE POWER FLOW ------------------------------------------
     # =========================================================================
@@ -1093,7 +1095,18 @@ if __name__ == "__main__":
     if RUN_OPF:
         # -- SOLVE BASECASE OPTIMAL POWER FLOW --------------------------------
         print('SOLVING BASECASE OPTIMAL POWER FLOW ................................')
-        pp.runopp(net,  init='flat', calculate_voltage_angles=True, verbose=True, suppress_warnings=True)
+        pp.runopp(net,  init='flat', calculate_voltage_angles=True, verbose=False, suppress_warnings=True)
+
+        # -- PARTICIPATING GENERATORS Pmin = max(Pgen + reserve, Pmin) --------
+        for gbus in genbuses:
+            if gbus in greservedict:
+                reserve = greservedict[gbus]
+                pgen = net.res_gen.loc[gbus]['p_kw']
+                pmin = net.gen.loc[gbus]['min_p_kw']
+                new_pmin = max(pgen + reserve, pmin)
+                net.gen.loc[gbus, 'min_p_kw'] = new_pmin
+
+        # -- COPY BASE CASE NETWORK FOR CONTINGENCY INITIALIZATION ------------
         opf_base_net = copy.deepcopy(net)
 
         # -- GET BASECASE OPF RESULTS FROM SOLUTION ---------------------------
@@ -1167,6 +1180,6 @@ if __name__ == "__main__":
             gen_results, pgens = write_gen_results(outfname2, gen_results, gids, genbuses, base_pgens, extgrid_results, swingbus, ext_grid_bus)
 
         print('DONE WITH OPF CONTINGENCIES ........................................', round(time.time() - start_time, 1))
-        # print()
-        # print('GENERATOR RESERVES')
-        # print(greservedict)
+        print()
+        print('GENERATOR RESERVES')
+        print(greservedict)
