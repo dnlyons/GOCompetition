@@ -39,8 +39,8 @@ if sys.argv[1:]:
     inl_fname = sys.argv[2]
     raw_fname = sys.argv[3]
     rop_fname = sys.argv[4]
-    outfname1 = 'solution1.txt'
-    outfname2 = 'solution2.txt'
+    outfname1 = cwd + r'/solution1.txt'
+    outfname2 = cwd + r'/solution2.txt'
 
 
 CONRATING = 2       # contingency line and xfmr ratings 0=RateA, 1=RateB, 2=RateC
@@ -383,19 +383,19 @@ def write_base_bus_results(fname, b_results, f_dict, s_dict, g_results, sh_resul
     buslist = [b_results.columns.values.tolist()] + b_results.values.tolist()
     # -- GET ANY SHUNT MVARS FOR REPORTING ------------------------------------
     # -- (SWITCHED SHUNTS ARE MODELED AS GENERATORS) --------------------------
-    for j in range(1, len(buslist)):
-        buslist[j][0] = int(buslist[j][0])
-        bus = buslist[j][0]
-        mvars = 0.0
-        if bus in f_dict:
-            mvars = -1e-3 * sh_results.loc[f_dict[bus], 'q_kvar']
-        if bus in s_dict:
-            mvars = -1e-3 * g_results.loc[s_dict[bus], 'q_kvar']
-        if bus in f_dict and bus in s_dict:
-            mvars1 = -1e-3 * sh_results.loc[f_dict[bus], 'q_kvar']
-            mvars2 = -1e-3 * g_results.loc[s_dict[bus], 'q_kvar']
-            mvars = mvars1 + mvars2
-        buslist[j][3] = mvars + 0.0
+    #for j in range(1, len(buslist)):
+    #    buslist[j][0] = int(buslist[j][0])
+    #    bus = buslist[j][0]
+    #    mvars = 0.0
+    #    if bus in f_dict:
+    #        mvars = -1e-3 * sh_results.loc[f_dict[bus], 'q_kvar']
+    #    if bus in s_dict:
+    #        mvars = -1e-3 * g_results.loc[s_dict[bus], 'q_kvar']
+    #    if bus in f_dict and bus in s_dict:
+    #        mvars1 = -1e-3 * sh_results.loc[f_dict[bus], 'q_kvar']
+    #        mvars2 = -1e-3 * g_results.loc[s_dict[bus], 'q_kvar']
+    #        mvars = mvars1 + mvars2
+    #    buslist[j][3] = mvars + 0.0
     # -- WRITE THE BUS RESULTS TO FILE ----------------------------------------
     write_csvdata(fname, buslist, [['--bus section']])
     return b_results
@@ -603,6 +603,7 @@ if __name__ == "__main__":
     # =========================================================================
     # -- PARSE THE RAW FILE ---------------------------------------------------
     # =========================================================================
+    print()
     print('GETTING RAW DATA FROM FILE .........................................', os.path.split(raw_fname)[1])
     raw_busdata = []
     raw_loaddata = []
@@ -676,7 +677,6 @@ if __name__ == "__main__":
     # =========================================================================
     # -- PARSE CON FILE -------------------------------------------------------
     # =========================================================================
-    print()
     print('GETTING CONTINGENCY DATA FROM FILE .................................', os.path.split(con_fname)[1])
     outagedict = get_contingencies(con_fname)
     # =========================================================================
@@ -803,7 +803,7 @@ if __name__ == "__main__":
                 if genkey in greservedata:
                     greserve = greservedata[genkey]
 
-                    idx = pp.create_gen(net, genbus, pgen, vm_pu=vreg, name=gid, min_p_kw=pmin, max_p_kw=pmax, min_q_kvar=qmin, max_q_kvar=qmax,
+                    idx = pp.create_gen(net, genbus, pgen, vm_pu=vreg, name=genkey, min_p_kw=pmin, max_p_kw=pmax, min_q_kvar=qmin, max_q_kvar=qmax,
                                         scaling=1.0, controllable=True, in_service=status, index=genbus)
                     pp.create_piecewise_linear_cost(net, idx, 'gen', pcostdata, type='p')
 
@@ -813,7 +813,7 @@ if __name__ == "__main__":
                     genbuses.append(genbus)
                     gids.append("'" + gid + "'")
             else:
-                idx = pp.create_gen(net, genbus, pgen, vm_pu=vreg, name=gid,
+                idx = pp.create_gen(net, genbus, pgen, vm_pu=vreg, name=genkey,
                                     scaling=1.0, controllable=False, in_service=status, index=genbus)
                 gendict.update({genkey: idx})
                 genreg.update({genbus: vreg})
@@ -1007,7 +1007,7 @@ if __name__ == "__main__":
         base_net = copy.deepcopy(net)
 
         # -- GET BASECASE RESULTS FROM SOLUTION -------------------------------
-        base_shunt_results = net.res_shunt
+        base_shunt_results = net.shunt
         base_gen_results = net.res_gen
         base_bus_results = net.res_bus
         base_extgrid_results = net.res_ext_grid
@@ -1038,13 +1038,13 @@ if __name__ == "__main__":
 
             # -- CONTINGENCY RESULTS FROM SOLUTION ----------------------------
             bus_results = net.res_bus
-            shunt_results = net.res_shunt
+            shunt_data = net.res_shunt
             gen_results = net.res_gen
             extgrid_results = net.res_ext_grid
 
             # -- WRITE CONTINGENCY BUS AND GENERATOR RESULTS TO FILE ----------
             conlabel = "'" + outagedict['gen'][j] + "'"
-            bus_results = write_bus_results(outfname2, bus_results, fx_dict, sw_dict, gen_results, shunt_results, conlabel, ext_grid_bus)
+            bus_results = write_bus_results(outfname2, bus_results, fx_dict, sw_dict, gen_results, shunt_data, conlabel, ext_grid_bus)
             gen_results, pgens = write_gen_results(outfname2, gen_results, gids, genbuses, base_pgens, extgrid_results, swingbus, ext_grid_bus)
 
         if outagedict['branch']:
@@ -1064,13 +1064,13 @@ if __name__ == "__main__":
 
             # -- CONTINGENCY RESULTS FROM SOLUTION ----------------------------
             bus_results = net.res_bus
-            shunt_results = net.res_shunt
+            shunt_data = net.shunt
             gen_results = net.res_gen
             extgrid_results = net.res_ext_grid
 
             # -- WRITE CONTINGENCY BUS AND GENERATOR RESULTS TO FILE ----------
             conlabel = "'" + outagedict['branch'][j] + "'"
-            bus_results = write_bus_results(outfname2, bus_results, fx_dict, sw_dict, gen_results, shunt_results, conlabel, ext_grid_bus)
+            bus_results = write_bus_results(outfname2, bus_results, fx_dict, sw_dict, gen_results, shunt_data, conlabel, ext_grid_bus)
             gen_results, pgens = write_gen_results(outfname2, gen_results, gids, genbuses, base_pgens, extgrid_results, swingbus, ext_grid_bus)
 
         print('DONE WITH CONTINGENCIES POWER FLOW .................................', round(time.time() - start_time, 1))
@@ -1096,7 +1096,7 @@ if __name__ == "__main__":
         opf_base_net = copy.deepcopy(net)
 
         # -- GET BASECASE OPF RESULTS FROM SOLUTION ---------------------------
-        base_shunt_results = net.res_shunt
+        base_shunt_results = net.shunt
         base_gen_results = net.res_gen
         base_bus_results = net.res_bus
         base_extgrid_results = net.res_ext_grid
@@ -1130,13 +1130,13 @@ if __name__ == "__main__":
 
             # -- CONTINGENCY RESULTS FROM SOLUTION ----------------------------
             bus_results = net.res_bus
-            shunt_results = net.res_shunt
+            shunt_data = net.shunt
             gen_results = net.res_gen
             extgrid_results = net.res_ext_grid
 
             # -- WRITE CONTINGENCY BUS AND GENERATOR RESULTS TO FILE ----------
             conlabel = "'" + outagedict['gen'][j] + "'"
-            bus_results = write_bus_results(outfname2, bus_results, fx_dict, sw_dict, gen_results, shunt_results, conlabel, ext_grid_bus)
+            bus_results = write_bus_results(outfname2, bus_results, fx_dict, sw_dict, gen_results, shunt_data, conlabel, ext_grid_bus)
             gen_results, pgens = write_gen_results(outfname2, gen_results, gids, genbuses, base_pgens, extgrid_results, swingbus, ext_grid_bus)
 
         if outagedict['branch']:
@@ -1154,15 +1154,38 @@ if __name__ == "__main__":
                 print('LINE OR TRANSFORMER NOT FOUND ......................................', conlabel)
             pp.runopp(net, init='flat', calculate_voltage_angles=True, verbose=True, suppress_warnings=True)
 
+            # -- DEVELOPEMENT -----------------------------------------------------
+            # print_dataframes_results(net)
+
             # -- CONTINGENCY RESULTS FROM SOLUTION ----------------------------
             bus_results = net.res_bus
-            shunt_results = net.res_shunt
+            shunt_data = net.shunt
             gen_results = net.res_gen
             extgrid_results = net.res_ext_grid
 
             # -- WRITE CONTINGENCY BUS AND GENERATOR RESULTS TO FILE ----------
             conlabel = "'" + outagedict['branch'][j] + "'"
-            bus_results = write_bus_results(outfname2, bus_results, fx_dict, sw_dict, gen_results, shunt_results, conlabel, ext_grid_bus)
+            bus_results = write_bus_results(outfname2, bus_results, fx_dict, sw_dict, gen_results, shunt_data, conlabel, ext_grid_bus)
             gen_results, pgens = write_gen_results(outfname2, gen_results, gids, genbuses, base_pgens, extgrid_results, swingbus, ext_grid_bus)
 
     print('DONE WITH OPF CONTINGENCIES ........................................', round(time.time() - start_time, 1))
+
+    print()
+    total_cost = 0.0
+    gidxs = gendict.keys()
+    gbuses = net.gen['bus'].values
+    for gbus in gbuses:
+        gkey = net.gen.loc[gbus, 'name']
+        pgen = -1e3 * net.res_gen.loc[gbus, 'mw']
+        # print(pgen, gkey)
+        disptablekey = genopfdict[gkey]
+        costtablekey = gdispdict[disptablekey]
+        pcostdata = pwlcostdata[costtablekey]
+        p = [x[0] for x in pcostdata]
+        c = [x[1] for x in pcostdata]
+        cost = numpy.interp(pgen, p, c)
+        total_cost += cost
+
+    print()
+    print('TOTAL COST =',total_cost)
+
