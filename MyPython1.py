@@ -12,9 +12,9 @@ cwd = os.path.dirname(__file__)
 
 # -- DEVELOPMENT DEFAULT ------------------------------------------------------
 if not sys.argv[1:]:
-    con_fname = cwd + r'/sandbox/scenario_1/case.con'
+    con_fname = cwd + r'/sandbox/scenario_1/custom_case.con'
     inl_fname = cwd + r'/sandbox/scenario_1/case.inl'
-    raw_fname = cwd + r'/sandbox/scenario_1/case.raw'
+    raw_fname = cwd + r'/sandbox/scenario_1/custom_case.raw'
     rop_fname = cwd + r'/sandbox/scenario_1/case.rop'
     outfname1 = cwd + r'/sandbox/scenario_1/solution1.txt'
     outfname2 = cwd + r'/sandbox/scenario_1/solution2.txt'
@@ -29,15 +29,23 @@ if sys.argv[1:]:
     outfname1 = 'solution1.txt'
     outfname2 = 'solution2.txt'
 
-
 CONRATING = 2       # contingency line and xfmr ratings 0=RateA, 1=RateB, 2=RateC
 ITMXN = 40          # max iterations solve option
-RUN_OPF = 1         # 0=normal powerflow, 1=optimal powerflow
+# RUN_OPF = 1         # 0=normal powerflow, 1=optimal powerflow
 
 
 # =============================================================================
 # -- FUNCTIONS ----------------------------------------------------------------
 # =============================================================================
+def listoflists(tt):
+    """ convert tuple_of_tuples to list_of_lists """
+    return list((listoflists(x) if isinstance(x, tuple) else x for x in tt))
+
+
+def tupleoftuples(ll):
+    """ convert list_of_lists to tuple_of_tuples """
+    return tuple((tupleoftuples(x) if isinstance(x, list) else x for x in ll))
+
 def get_raw_csvdata(fname):
     with open(fname, 'r') as fobject:
         reader = csv.reader(fobject, delimiter=',', quotechar="'")
@@ -87,10 +95,10 @@ def get_contingencies(fname):
                     break
                 if len(line) == 10:
                     bkey = line[4] + '-' + line[7] + '-' + line[9]
-                    condict['branch'].update({clabel: bkey})
+                    condict['branch'].update({bkey: clabel})
                 if len(line) == 6:
                     gkey = line[5] + '-' + line[2]
-                    condict['gen'].update({clabel: gkey})
+                    condict['gen'].update({gkey: clabel})
     return condict
 
 
@@ -133,7 +141,7 @@ def format_fixshuntdata(lol):
     # fixshunt = ['I', 'ID', 'STATUS', 'GL', 'BL']
     if lol != [[]]:
         for i in range(len(lol)):
-            lol[i] = [int(lol[i][0]), str(lol[i][1]), int(lol[i][2]), float(lol[i][3]), float(lol[i][4])]
+            lol[i] = [int(lol[i][0]), str(lol[i][1]), int(lol[i][2]), -1e3 * float(lol[i][3]), -1e3 * float(lol[i][4])]
     return lol
 
 
@@ -143,12 +151,12 @@ def format_gendata(lol):
     if lol != [[]]:
         for i in range(len(lol)):
             lol[i] = [int(lol[i][0]), str(lol[i][1]),
-                      round(-1e3 * float(lol[i][2]), 5), round(-1e3 * float(lol[i][3]), 5),
-                      round(-1e3 * float(lol[i][4]), 5), round(-1e3 * float(lol[i][5]), 5),
+                      -1e3 * float(lol[i][2]), -1e3 * float(lol[i][3]),
+                      -1e3 * float(lol[i][4]), -1e3 * float(lol[i][5]),
                       float(lol[i][6]), int(lol[i][7]), float(lol[i][8]), float(lol[i][9]), float(lol[i][10]),
                       float(lol[i][11]), float(lol[i][12]), float(lol[i][13]), int(lol[i][14]), float(lol[i][15]),
-                      round(-1e3 * float(lol[i][16]), 5),
-                      round(-1e3 * float(lol[i][17]), 5),
+                      -1e3 * float(lol[i][16]),
+                      -1e3 * float(lol[i][17]),
                       int(lol[i][18]), float(lol[i][19]),
                       int(lol[i][20]), float(lol[i][21]),
                       int(lol[i][22]), float(lol[i][23]),
@@ -286,12 +294,13 @@ def format_swshuntdata(lol):
     # I, MODSW, ADJM, STAT, VSWHI, VSWLO, SWREM, RMPCT, RMIDNT, BINIT, N1, B1, N2, B2, N3, B3, N4, B4, N5, B5, N6, B6, N7, B7, N8, B8
     if lol != [[]]:
         for i in range(len(lol)):
-            lol[i] = [int(lol[i][0]), int(lol[i][1]), int(lol[i][2]), int(lol[i][3]), float(lol[i][4]),
-                      float(lol[i][5]), int(lol[i][6]), float(lol[i][7]), str(lol[i][8]), float(lol[i][9]),
-                      int(lol[i][10]), float(lol[i][11]), int(lol[i][12]), float(lol[i][13]),
-                      int(lol[i][14]), float(lol[i][15]), int(lol[i][16]), float(lol[i][17]),
-                      int(lol[i][18]), float(lol[i][19]), int(lol[i][20]), float(lol[i][21]),
-                      int(lol[i][22]), float(lol[i][23]), int(lol[i][24]), float(lol[i][25])]
+            lol[i] = [
+
+                int(lol[i][0]), int(lol[i][1]), int(lol[i][2]), int(lol[i][3]), float(lol[i][4]),
+                float(lol[i][5]), int(lol[i][6]), float(lol[i][7]), str(lol[i][8]), -1e3 * float(lol[i][9]),
+                int(lol[i][10]), -1e3 * float(lol[i][11]), int(lol[i][12]), -1e3 * float(lol[i][13]), int(lol[i][14]), -1e3 * float(lol[i][15]),
+                int(lol[i][16]), -1e3 * float(lol[i][17]), int(lol[i][18]), -1e3 * float(lol[i][19]), int(lol[i][20]),  -1e3 * float(lol[i][21]),
+                int(lol[i][22]), -1e3 * float(lol[i][23]), int(lol[i][24]), -1e3 * float(lol[i][25])]
     return lol
 
 
@@ -317,13 +326,17 @@ def get_swing_gen_data(lol, swbus):
     for i in lol:
         if i[0] == swbus:
             sw_key = str(i[0]) + '-' + i[1]
+            sw_id = i[1]
+            sw_pgen = i[2]
+            sw_qgen = i[3]
             sw_qmin = i[4]
             sw_qmax = i[5]
             vreg_sw = i[6]
             sw_pmin = i[16]
             sw_pmax =i[17]
             break
-    return sw_key, vreg_sw, sw_qmin, sw_qmax, sw_pmin, sw_pmax
+    gdata = [x for x in lol if x[0] != swbus]
+    return [gdata, sw_key, sw_id, vreg_sw,  sw_pgen, sw_pmin, sw_pmax, sw_qgen, sw_qmin, sw_qmax]
 
 
 def write_csvdata(fname, lol, label):
@@ -336,8 +349,7 @@ def write_csvdata(fname, lol, label):
     return
 
 
-def write_base_bus_results(fname, b_results, f_dict, s_dict, g_results, sh_results, exgridbus):
-
+def write_base_bus_results(fname, b_results, fx_dict, sw_dict, g_results, sh_results, exgridbus):
     # -- DELETE UNUSED DATAFRAME COLUMNS --------------------------------------
     try:
         del b_results['p_kw']        # not used for reporting
@@ -374,31 +386,31 @@ def write_base_bus_results(fname, b_results, f_dict, s_dict, g_results, sh_resul
         buslist[j][0] = int(buslist[j][0])
         bus = buslist[j][0]
         mvars = 0.0
-        #if bus in f_dict:
-        #    mvars = -1e-3 * sh_results.loc[f_dict[bus], 'q_kvar']
-        #if bus in s_dict:
-        #    mvars = -1e-3 * g_results.loc[s_dict[bus], 'q_kvar']
-        #if bus in f_dict and bus in s_dict:
-        #    mvars1 = -1e-3 * sh_results.loc[f_dict[bus], 'q_kvar']
-        #    mvars2 = -1e-3 * g_results.loc[s_dict[bus], 'q_kvar']
+        #if bus in fx_dict:
+        #    mvars = -1e-3 * sh_results.loc[fx_dict[bus], 'q_kvar']
+        #if bus in sw_dict:
+        #    mvars = -1e-3 * g_results.loc[sw_dict[bus], 'q_kvar']
+        #if bus in fx_dict and bus in sw_dict:
+        #    mvars1 = -1e-3 * sh_results.loc[fx_dict[bus], 'q_kvar']
+        #    mvars2 = -1e-3 * g_results.loc[sw_dict[bus], 'q_kvar']
         #    mvars = mvars1 + mvars2
         buslist[j][3] = mvars + 0.0
     # -- WRITE THE BUS RESULTS TO FILE ----------------------------------------
     write_csvdata(fname, buslist, [['--bus section']])
-    return b_results
+    return
 
 
-def write_base_gen_results(fname, g_results, genids, gbuses, e_results, swbus, exgridbus):
-    g_results.drop(g_results.index[sw_indexes], inplace=True)
+def write_base_gen_results(fname, g_results, genids, gbuses, e_results, swing_bus, exgridbus, sw_idxs):
+    g_results.drop(sw_idxs, inplace=True)
     del g_results['vm_pu']
     del g_results['va_degree']
     # -- COMBINE SWING GENERATOR AND EXTERNAL GRID CONTRIBUTIONS --------------
-    sw_kw = g_results.loc[swbus, 'p_kw']
-    sw_kvar = g_results.loc[swbus, 'q_kvar']
+    sw_kw = g_results.loc[swing_bus, 'p_kw']
+    sw_kvar = g_results.loc[swing_bus, 'q_kvar']
     ex_kw = e_results.loc[exgridbus, 'p_kw']
     ex_kvar = e_results.loc[exgridbus, 'q_kvar']
-    g_results.loc[swbus, 'p_kw'] = sw_kw + ex_kw
-    g_results.loc[swbus, 'q_kvar'] = sw_kvar + ex_kvar
+    g_results.loc[swing_bus, 'p_kw'] = sw_kw + ex_kw
+    g_results.loc[swing_bus, 'q_kvar'] = sw_kvar + ex_kvar
     # -- CONVERT BACK TO MW AND MVARS -----------------------------------------
     g_results['p_kw'] *= -1e-3
     g_results['q_kvar'] *= -1e-3
@@ -415,10 +427,10 @@ def write_base_gen_results(fname, g_results, genids, gbuses, e_results, swbus, e
     glist = [g_results.columns.values.tolist()] + g_results.values.tolist()
     # -- WRITE THE GENERATION RESULTS TO FILE ---------------------------------
     write_csvdata(fname, glist, [['--generator section']])
-    return g_results, pgenerators
+    return pgenerators
 
 
-def write_bus_results(fname, b_results, f_dict, s_dict, g_results, sh_results, clabel, exgridbus):
+def write_bus_results(fname, b_results, fx_dict, sw_dict, g_results, sh_results, clabel, exgridbus):
     # -- DELETE UNUSED DATAFRAME COLUMNS --------------------------------------
     try:
         del b_results['p_kw']        # not used for reporting
@@ -455,23 +467,23 @@ def write_bus_results(fname, b_results, f_dict, s_dict, g_results, sh_results, c
         buslist[j][0] = int(buslist[j][0])
         bus = buslist[j][0]
         mvars = 0.0
-        #if bus in f_dict:
-        #    mvars = -1e-3 * sh_results.loc[f_dict[bus], 'q_kvar']
-        #if bus in s_dict:
-        #    mvars = -1e-3 * g_results.loc[s_dict[bus], 'q_kvar']
-        #if bus in f_dict and bus in s_dict:
-        #    mvars1 = -1e-3 * sh_results.loc[f_dict[bus], 'q_kvar']
-        #    mvars2 = -1e-3 * g_results.loc[s_dict[bus], 'q_kvar']
+        #if bus in fx_dict:
+        #    mvars = -1e-3 * sh_results.loc[fx_dict[bus], 'q_kvar']
+        #if bus in sw_dict:
+        #    mvars = -1e-3 * g_results.loc[sw_dict[bus], 'q_kvar']
+        #if bus in fx_dict and bus in sw_dict:
+        #    mvars1 = -1e-3 * sh_results.loc[fx_dict[bus], 'q_kvar']
+        #    mvars2 = -1e-3 * g_results.loc[sw_dict[bus], 'q_kvar']
         #    mvars = mvars1 + mvars2
         buslist[j][3] = mvars + 0.0
     # -- WRITE THE BUS RESULTS TO FILE ----------------------------------------
     write_csvdata(fname, [], [['--contingency'], ['label'], [clabel]])
     write_csvdata(fname, buslist, [['--bus section']])
-    return b_results
+    return
 
 
-def write_gen_results(fname, g_results, genids, gbuses, b_pgens, e_results, swbus, exgridbus):
-    g_results.drop(g_results.index[sw_indexes], inplace=True)
+def write_gen_results(fname, g_results, genids, gbuses, b_pgens, e_results, swbus, exgridbus, sw_idxs):
+    g_results.drop(sw_idxs, inplace=True)
     del g_results['vm_pu']
     del g_results['va_degree']
     # -- COMBINE SWING GENERATOR AND EXTERNAL GRID CONTRIBUTIONS --------------
@@ -499,7 +511,7 @@ def write_gen_results(fname, g_results, genids, gbuses, b_pgens, e_results, swbu
     write_csvdata(fname, glist, [['--generator section']])
     deltapgens = c_gens - b_pgens
     write_csvdata(fname, [], [['--delta section'], ['delta_p'], [deltapgens]])
-    return g_results, c_gens
+    return
 
 
 def format_gendispdata(lol):
@@ -539,10 +551,19 @@ def format_pwlcostdata(lol):
                 ckey = lol[i][0]
                 cdict.update({ckey: []})
             if len(lol[i]) == 2:
-                lol[i] = [round(-1e3 * float(lol[i][0]), 5), round(float(lol[i][1]), 5)]
+                lol[i] = [-1e3 * float(lol[i][0]), float(lol[i][1])]
                 cdict[ckey].append(lol[i])
     for ckey in cdict:
+        # cdict[ckey] = tupleoftuples(cdict[ckey])
+        # cdict[ckey] = list(set(cdict[ckey]))
+        # cdict[ckey] = listoflists(cdict[ckey])
         cdict[ckey].sort()
+        cdict[ckey][0][0] -= 1.0
+        cdict[ckey][-1][0] += 1.0
+        for j in range(1, len(cdict[ckey])):
+            cdict[ckey][j][0] = cdict[ckey][j][0] + 0.1 * j
+
+
     return cdict
 
 
@@ -628,12 +649,12 @@ if __name__ == "__main__":
                 break
             record.append(line)
     # =========================================================================
-    if not raw_busdata: raw_busdata = [[]]
-    if not raw_loaddata: raw_loaddata = [[]]
+    # if not raw_busdata: raw_busdata = [[]]
+    # if not raw_loaddata: raw_loaddata = [[]]
     if not raw_fixshuntdata: raw_fixshuntdata = [[]]
-    if not raw_gendata: raw_gendata = [[]]
-    if not raw_branchdata: raw_branchdata = [[]]
-    if not raw_xfmrdata: raw_xfmrdata = [[]]
+    # if not raw_gendata: raw_gendata = [[]]
+    # if not raw_branchdata: raw_branchdata = [[]]
+    # if not raw_xfmrdata: raw_xfmrdata = [[]]
     if not raw_zonedata: raw_zonedata = [[]]
     if not raw_ownerdata: raw_ownerdata = [[]]
     if not raw_swshuntdata: raw_swshuntdata = [[]]
@@ -658,8 +679,8 @@ if __name__ == "__main__":
     # -- GET SWING BUS FROM RAW BUSDATA ---------------------------------------
     swingbus, swing_name, swing_kv, swing_angle, swing_vlow, swing_vhigh = get_swingbus_data(raw_busdata)
 
-    # -- GET SWING GEN REGULATED VOLTAGE FROM GENDATA -------------------------
-    swing_key, swing_vreg, swing_qmin, swing_qmax, swing_pmin, swing_pmax = get_swing_gen_data(raw_gendata, swingbus)
+    # -- GET SWING GEN DATA FROM GENDATA (REMOVE SWING GEN FROM GENDATA) ------
+    gendata, swing_key, swing_id, swing_vreg, swing_pgen, swing_pmin, swing_pmax, swing_qgen, swing_qmin, swing_qmax = get_swing_gen_data(gendata, swingbus)
 
     # =========================================================================
     # -- PARSE CON FILE -------------------------------------------------------
@@ -706,6 +727,7 @@ if __name__ == "__main__":
                 break
             record.append(line)
             line = next(dataobj)
+
     # =========================================================================
     if not rop_gendispdata: rop_gendispdata = [[]]
     if not rop_powerdispdata: rop_powerdispdata = [[]]
@@ -720,8 +742,8 @@ if __name__ == "__main__":
     # =========================================================================
     # -- PARSE THE INL FILE ---------------------------------------------------
     # =========================================================================
-    print('GETTING GENERATOR RESERVES FROM FILE ...............................', os.path.split(inl_fname)[1])
-    greservedata = get_gen_reserves(inl_fname)
+    print('GETTING GENERATOR PARTICIPATION FACTORS FROM FILE ..................', os.path.split(inl_fname)[1])
+    participation_dict = get_gen_reserves(inl_fname)
     # =========================================================================
 
     # =========================================================================
@@ -734,126 +756,163 @@ if __name__ == "__main__":
     # == ADD BUSES TO NETWORK =================================================
     # bus = ['I', 'NAME', 'BASKV', 'IDE', 'AREA', 'ZONE', 'OWNER', 'VM', 'VA', 'NVHI', 'NVLO', 'EVHI', 'EVLO']
     busdict = {}
-    if busdata != [[]]:
-        print('ADD BUSES ..........................................................')
-        for data in busdata:
-            busnum = data[0]
-            busname = data[1]
-            buskv = data[2]
-            buszone = data[5]
-            status = abs(data[3]) < 4
-            vmax = data[11]
-            vmin = data[12]
-            busdict.update({busnum: buskv})
-            idx = pp.create_bus(net, vn_kv=buskv, name=busname, index=busnum, type="b", zone=buszone, in_service=status, max_vm_pu=vmax, min_vm_pu=vmin)
+    print('ADD BUSES ..........................................................')
+    for data in busdata:
+        busnum = data[0]
+        busname = data[1]
+        buskv = data[2]
+        buszone = data[5]
+        status = abs(data[3]) < 4
+        vmax = data[11]
+        vmin = data[12]
+        busdict.update({busnum: buskv})
+        idx = pp.create_bus(net, vn_kv=buskv, name=busname, index=busnum, type="b", zone=buszone, in_service=status, max_vm_pu=vmax, min_vm_pu=vmin)
 
     # == ADD LOADS TO NETWORK =================================================
     print('ADD LOADS ..........................................................')
     # load = ['I', 'ID', 'STATUS', 'AREA', 'ZONE', 'PL', 'QL', 'IP', 'IQ', 'YP', 'YQ', 'OWNER', 'SCALE', 'INTRPT']
-    if loaddata != [[]]:
-        for data in loaddata:
-            loadbus = data[0]
-            loadname = data[1]
-            status = bool(data[2])
-            loadp = data[5] * 1e3
-            loadq = data[6] * 1e3
-            pp.create_load(net, loadbus, loadp, q_kvar=loadq, name=loadname, scaling=1.0, index=loadbus, in_service=status,
-                           max_p_kw=loadp, min_p_kw=loadp, max_q_kvar=loadq, min_q_kvar=loadq, controllable=False)
+    for data in loaddata:
+        status = bool(data[2])
+        if not status:
+            continue
+        loadbus = data[0]
+        loadid = data[1]
+        loadname = str(loadbus) + loadid
+        loadp = data[5] * 1e3
+        loadq = data[6] * 1e3
+        pp.create_load(net, loadbus, loadp, q_kvar=loadq, name=loadname, scaling=1.0,
+                       max_p_kw=loadp, min_p_kw=loadp, max_q_kvar=loadq, min_q_kvar=loadq, controllable=False)
 
     # == ADD GENERATORS TO NETWORK ============================================
     # gens = ['I', 'ID', 'PG', 'QG', 'QT', 'QB', 'VS', 'IREG', 'MBASE', 'ZR', 'ZX', 'RT', 'XT', 'GTAP', 'STAT', 'RMPCT', 'PT', 'PB',
     #         'O1', 'F1', 'O2', 'F2', 'O3', 'F3', 'O4', 'F4', 'WMOD', 'WPF']
+    print('ADD GENERATORS .....................................................')
     genbuses = []
     gids = []
     genreg = {}
-    gendict = {}
-    greservedict = {}
-    if gendata != [[]]:
-        print('ADD GENERATORS .....................................................')
-        for data in gendata:
-            genbus = data[0]
-            gid = data[1]
-            pgen = data[2]
-            qgen = data[3]
-            qmin = data[4]
-            qmax = data[5]
-            vreg = data[6]
-            status = bool(data[14])
-            pmin = data[16]
-            pmax = data[17]
-            pcostdata = None
-            genkey = str(genbus) + '-' + gid
-            if genkey in genopfdict:
-                disptablekey = genopfdict[genkey]
-                costtablekey = gdispdict[disptablekey]
-                pcostdata = numpy.array(pwlcostdata[costtablekey])
-                if genkey in greservedata:
-                    greserve = greservedata[genkey]
+    genidxdict = {}
+    pfactor_dict = {}
+    # -- ADD SWING GENERATOR --------------------------------------------------
+    genbus = swingbus
+    gid = swing_id
+    pgen = swing_pgen
+    qgen = swing_pgen
+    qmin = swing_qmin
+    qmax = swing_qmax
+    vreg = swing_vreg
+    status = True
+    pmin = swing_pmin
+    pmax = swing_pmax
+    pcostdata = None
+    genkey = str(swingbus) + '-' + gid
 
-                    idx = pp.create_gen(net, genbus, pgen, vm_pu=vreg, name=genkey, min_p_kw=pmin, max_p_kw=pmax, min_q_kvar=qmin, max_q_kvar=qmax,
-                                        scaling=1.0, controllable=True, in_service=status, index=genbus)
-                    pp.create_piecewise_linear_cost(net, idx, 'gen', pcostdata, type='p')
+    if genkey in genopfdict:
+        disptablekey = genopfdict[genkey]
+        costtablekey = gdispdict[disptablekey]
+        pcostdata = numpy.array(pwlcostdata[costtablekey])
+        idx = pp.create_gen(net, genbus, pgen, vm_pu=vreg, name=genkey, min_p_kw=pmin, max_p_kw=pmax, min_q_kvar=qmin, max_q_kvar=qmax,
+                            scaling=1.0, controllable=True, in_service=status, index=swingbus)  # force index to swingbus
+        pp.create_piecewise_linear_cost(net, idx, 'gen', pcostdata, type='p')
 
-                    gendict.update({genkey: idx})
-                    genreg.update({genbus: vreg})
-                    greservedict.update({genbus: greserve})
-                    genbuses.append(genbus)
-                    gids.append("'" + gid + "'")
-            else:
-                idx = pp.create_gen(net, genbus, pgen, vm_pu=vreg, name=genkey,
-                                    scaling=1.0, controllable=False, in_service=status, index=genbus)
-                gendict.update({genkey: idx})
-                genreg.update({genbus: vreg})
-                genbuses.append(genbus)
-                gids.append("'" + gid + "'")
+        if genkey in participation_dict:
+            pfactor = participation_dict[genkey]
+            pfactor_dict.update({genkey: pfactor})
+    else:
+        idx = pp.create_gen(net, genbus, pgen, vm_pu=vreg, name=genkey, min_p_kw=pmin, max_p_kw=pmax, min_q_kvar=qmin, max_q_kvar=qmax,
+                            scaling=1.0, controllable=False, in_service=status, index=swingbus)  # force index to swingbus
+
+    genidxdict.update({genkey: idx})
+    genreg.update({genbus: vreg})
+    genbuses.append(genbus)
+    gids.append("'" + gid + "'")
+
+    # -- ADD REMAINING GENERATOR ----------------------------------------------
+    for data in gendata:
+        genbus = data[0]
+        gid = data[1]
+        pgen = data[2]
+        qgen = data[3]
+        qmin = data[4]
+        qmax = data[5]
+        vreg = data[6]
+        status = bool(data[14])
+        pmin = data[16]
+        pmax = data[17]
+        pcostdata = None
+        genkey = str(genbus) + '-' + gid
+        if genkey in genopfdict:
+            disptablekey = genopfdict[genkey]
+            costtablekey = gdispdict[disptablekey]
+            pcostdata = numpy.array(pwlcostdata[costtablekey])
+            idx = pp.create_gen(net, genbus, pgen, vm_pu=vreg, name=genkey, min_p_kw=pmin, max_p_kw=pmax, min_q_kvar=qmin, max_q_kvar=qmax,
+                                scaling=1.0, controllable=True, in_service=status)
+
+            pp.create_piecewise_linear_cost(net, idx, 'gen', pcostdata, type='p')
+
+            if genkey in participation_dict:
+                pfactor = participation_dict[genkey]
+                pfactor_dict.update({genkey: pfactor})
+
+        else:
+            idx = pp.create_gen(net, genbus, pgen, vm_pu=vreg, name=genkey, min_p_kw=pmin, max_p_kw=pmax, min_q_kvar=qmin, max_q_kvar=qmax,
+                                scaling=1.0, controllable=True, in_service=status)
+
+        genidxdict.update({genkey: idx})
+        genreg.update({genbus: vreg})
+        genbuses.append(genbus)
+        gids.append("'" + gid + "'")
+    genbuses = list(set(genbuses))
 
     # == ADD FIXED SHUNT DATA TO NETWORK ======================================
     # fixshunt = ['I', 'ID', 'STATUS', 'GL', 'BL']
-    fx_dict = {}
+    fxidxdict = {}
     if fixshuntdata != [[]]:
         print('ADD FIXED SHUNTS ...................................................')
         for data in fixshuntdata:
+            status = bool(data[2])
+            if not status:
+                continue
             shuntbus = data[0]
-            shuntname = str(shuntbus) + 'fx'
-            status = data[2]
-            kvar = -1e3 * data[4]
-            idx = pp.create_shunt(net, shuntbus, kvar, step=1, max_step=True, name=shuntname, in_service=True, index=shuntbus)
-            # idx = pp.create_shunt(net, shuntbus, kvar, index=shuntbus)
-            fx_dict.update({shuntbus: idx})
+            shuntname = str(shuntbus) + '-FX'
+            kvar = data[4]
+            idx = pp.create_shunt(net, shuntbus, kvar, step=1, max_step=True, name=shuntname)
+            fxidxdict.update({shuntbus: idx})
 
     # == ADD SWITCHED SHUNTS TO NETWORK =======================================
-    # TODO ----- DONE ----- SWITCHED SHUNTS AS DYNAMIC REACTIVE GENERATORS ----
+    # -- SWSHUNTS ARE MODELED AS Q-GENERATORS ---------------------------------
     # swshunt = ['I', 'MODSW', 'ADJM', 'STAT', 'VSWHI', 'VSWLO', 'SWREM', 'RMPCT', 'RMIDNT', 'BINIT', 'N1', 'B1',
     #            'N2', 'B2', 'N3', 'B3', 'N4', 'B4', 'N5', 'B5', 'N6', 'B6', 'N7', 'B7', 'N8', 'B8']
-    sw_dict = {}
-    sw_indexes = []
+    # gens = ['I', 'ID', 'PG', 'QG', 'QT', 'QB', 'VS', 'IREG', 'MBASE', 'ZR', 'ZX', 'RT', 'XT', 'GTAP', 'STAT', 'RMPCT', 'PT', 'PB',
+    #         'O1', 'F1', 'O2', 'F2', 'O3', 'F3', 'O4', 'F4', 'WMOD', 'WPF']
+    swidxdict = {}
+    swidxs = []
     if swshuntdata != [[]]:
         print('ADD SWITCHED SHUNTS ................................................')
         for data in swshuntdata:
+            status = bool(data[3])
+            if not status:
+                continue
             shuntbus = data[0]
-            status = data[3]
             max_vreg = data[4]
             min_vreg = data[5]
             vreg = round((max_vreg + min_vreg) / 2.0, 4)
             if shuntbus in genreg:
                 vreg = genreg[shuntbus]
-            remote_bus = data[6]
-            kvar_int = -1e3 * data[9]
+            kvar_int = data[9]
+            swshkey = str(shuntbus) + '-SW'
             steps = [data[10], data[12], data[14], data[16], data[18], data[20], data[22], data[24]]
-            kvars = -1000 * [data[11], data[13], data[15], data[17], data[19], data[21], data[23], data[25]]
-            total_inductance = 0.0
-            total_capacitance = 0.0
+            kvars = [data[11], data[13], data[15], data[17], data[19], data[21], data[23], data[25]]
+            total_qmin = 0.0
+            total_qmax = 0.0
             for j in range(len(kvars)):
                 if kvars[j] < 0.0:
-                    total_capacitance += steps[j] * kvars[j]
+                    total_qmin += steps[j] * kvars[j]
                 elif kvars[j] > 0.0:
-                    total_inductance += steps[j] * kvars[j]
-            # NO SWSHUNTS IN SANDBOX
-            print('SWITCHED SHUNT REACTIVE =', total_inductance, total_capacitance)
-            idx = pp.create_gen(net, shuntbus, 0.0, vm_pu=vreg, max_q_kvar=total_capacitance, min_q_kvar=total_inductance,
-                                min_p_kw=0.0, max_p_kw=0.0, controllable=False, in_service=status)
-            sw_dict.update({shuntbus: idx})
-            sw_indexes.append(idx)
+                    total_qmax += steps[j] * kvars[j]
+            idx = pp.create_gen(net, shuntbus, kvar_int, vm_pu=vreg, min_q_kvar=total_qmin, max_q_kvar=total_qmax,
+                                min_p_kw=0.0, max_p_kw=0.0, controllable=False, name=swshkey)
+            swidxdict.update({shuntbus: idx})
+            swidxs.append(idx)
 
     # == ADD LINES TO NETWORK =================================================
     # branch = ['I', 'J', 'CKT', 'R', 'X', 'B', 'RATEA', 'RATEB', 'RATEC', 'GI', 'BI', 'GJ', 'BJ', 'ST', 'MET', 'LEN',
@@ -885,10 +944,9 @@ if __name__ == "__main__":
             elif CONRATING == 2:
                 mva_rating = data[8]
             i_rating = mva_rating / (math.sqrt(3) * kv)
-            line_index = int(str(frombus) + str(tobus))
             linekey = str(frombus) + '-' + str(tobus) + '-' + ckt
             idx = pp.create_line_from_parameters(net, frombus, tobus, length, r, x, capacitance, i_rating, name=linekey,
-                                                 in_service=status, df=1.0, parallel=1, max_loading_percent=100.0, index=line_index)
+                                                 in_service=status, max_loading_percent=100.0)
             linedict.update({linekey: idx})
 
     # == ADD 2W TRANSFORMERS TO NETWORK =======================================
@@ -946,24 +1004,22 @@ if __name__ == "__main__":
             noloadlosses = 100.0 * data[7]              # % no-load current / full-load current
             ironlosses = 0.0
             xfmr2wkey = str(frombus) + '-' + str(tobus) + '-' + ckt
-            xfmr2windex = int(str(frombus) + str(tobus))
 
             idx = pp.create_transformer_from_parameters(net, frombus, tobus, kva_rating, fromkv, tokv, r_pct, z_pct, ironlosses, noloadlosses, shift_degree=phaseshift,
                                                         tp_side=tapside, tp_mid=tapmid, tp_max=tapmax, tp_min=tapmin, tp_st_percent=tap_pct, tp_pos=tappos, in_service=status,
-                                                        max_loading_percent=100.0, parallel=1, df=1.0, index=xfmr2windex, name=xfmr2wkey)
+                                                        max_loading_percent=100.0, name=xfmr2wkey)
             xfmrdict.update({xfmr2wkey: idx})
             xfmr_ratea_dict.update({xfmr2wkey: kva_rating_a})
 
     # == ADD EXTERNAL GRID (PARALLEL TO SWING BUS) ============================
     ext_grid_bus = pp.create_bus(net, vn_kv=swing_kv, name='Ex_Grid_Bus', in_service=True, max_vm_pu=swing_vhigh, min_vm_pu=swing_vlow)
     ext_tie_rating = 1e9/(math.sqrt(3) * swing_kv)
-    tie_index = int(str(swingbus) + str(ext_grid_bus))
-    pp.create_line_from_parameters(net,  swingbus, ext_grid_bus, 1.0, 0.0, 0.002, 0.0, ext_tie_rating, name='Swing-Tie', in_service=True, df=1.0, index=tie_index)
-    pp.create_ext_grid(net, ext_grid_bus, vm_pu=swing_vreg, va_degree=swing_angle, in_service=True, min_p_kw=-1e9, max_p_kw=0.0,
+    # tie_index = int(str(swingbus) + str(ext_grid_bus))
+    pp.create_line_from_parameters(net,  swingbus, ext_grid_bus, 1.0, 0.0, 0.002, 0.0, ext_tie_rating, name='Swing-Tie')
+    pp.create_ext_grid(net, ext_grid_bus, vm_pu=swing_vreg, va_degree=swing_angle, min_p_kw=-1e9, max_p_kw=0.0,
                        min_q_kvar=-1e9, max_q_kvar=0.0, index=ext_grid_bus)
     pp.create_polynomial_cost(net, ext_grid_bus, 'ext_grid', numpy.array([-1, 0]), type='p')
 
-    print('--------------------------------------------------------------------')
     # -- DONE CREATING NETWORK ------------------------------------------------
 
     # -- DIAGNOSTIC DEVELOPMENT -----------------------------------------------
@@ -977,162 +1033,164 @@ if __name__ == "__main__":
         os.remove(outfname2)
     except FileNotFoundError:
         pass
+    #try:
+    #    os.remove(base_outfname1)
+    #except FileNotFoundError:
+    #    pass
+    #try:
+    #    os.remove(base_outfname2)
+    #except FileNotFoundError:
+    #    pass
 
-    # -- RUN STRAIGHT POWER FLOW SOLUTION -------------------------------------
-    print('SOLVING NETWORK ....................................................')
-
-    pp.runpp(net, init='auto', max_iteration=ITMXN, calculate_voltage_angles=True, enforce_q_lims=True)
+    # print('--------------------------------------------------------------------')
+    # print('----------------------- STRAIGHT POWER FLOW ------------------------')
+    # print('--------------------------------------------------------------------')
+    # print('SOLVING NETWORK ....................................................')
+    # pp.runpp(net, init='auto', max_iteration=ITMXN, calculate_voltage_angles=True, enforce_q_lims=True)
 
     # =========================================================================
     # -- PROCESS BASECASE POWER FLOW ------------------------------------------
     # =========================================================================
-    if not RUN_OPF:
-        # -- SOLVE BASECASE POWER FLOW ----------------------------------------
-        print('SOLVING BASECASE POWER FLOW ........................................')
-        pp.runpp(net, init='auto', max_iteration=ITMXN, calculate_voltage_angles=True, enforce_q_lims=True)
-        base_net = copy.deepcopy(net)
-
-        # -- GET BASECASE RESULTS FROM SOLUTION -------------------------------
-        base_shunt_results = net.shunt
-        base_gen_results = net.res_gen
-        base_bus_results = net.res_bus
-        base_extgrid_results = net.res_ext_grid
-
-        # print_dataframes_results(net)
-
-        # -- WRITE BASECASE BUS AND GENERATOR RESULTS TO FILE -----------------
-        base_bus_results = write_base_bus_results(outfname1, base_bus_results, fx_dict, sw_dict, base_gen_results, base_shunt_results, ext_grid_bus)
-        base_gen_results, base_pgens = write_base_gen_results(outfname1, base_gen_results, gids, genbuses, base_extgrid_results, swingbus, ext_grid_bus)
-        print('DONE WITH BASECASE POWER FLOW.......................................', round(time.time() - start_time, 1))
-        print()
-
-        # =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
-        # -- PROCESS POWER FLOW CONTINGENCIES  --------------------------------
-        # =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
-        start_time = time.time()
-        if outagedict['gen']:
-            print('RUNNING GENERATOR OUTAGES ..........................................')
-        for j in outagedict['gen']:
-            net = copy.deepcopy(base_net)
-            conlabel = outagedict['gen'][j]
-            if conlabel in gendict:
-                genidx = gendict[conlabel]
-                net.gen.in_service[genidx] = False
-            else:
-                print('GENERATOR NOT FOUND ................................................', conlabel)
-            pp.runpp(net, init='auto', max_iteration=ITMXN, calculate_voltage_angles=True, enforce_q_lims=True)
-
-            # -- CONTINGENCY RESULTS FROM SOLUTION ----------------------------
-            bus_results = net.res_bus
-            shunt_data = net.res_shunt
-            gen_results = net.res_gen
-            extgrid_results = net.res_ext_grid
-
-            # -- WRITE CONTINGENCY BUS AND GENERATOR RESULTS TO FILE ----------
-            conlabel = "'" + outagedict['gen'][j] + "'"
-            bus_results = write_bus_results(outfname2, bus_results, fx_dict, sw_dict, gen_results, shunt_data, conlabel, ext_grid_bus)
-            gen_results, pgens = write_gen_results(outfname2, gen_results, gids, genbuses, base_pgens, extgrid_results, swingbus, ext_grid_bus)
-
-        if outagedict['branch']:
-            print('RUNNING LINE AND TRANSFORMER OUTAGES ...............................')
-        for j in outagedict['branch']:
-            net = copy.deepcopy(base_net)
-            conlabel = outagedict['branch'][j]
-            if conlabel in linedict:
-                lineidx = linedict[conlabel]
-                net.line.in_service[lineidx] = False
-            elif conlabel in xfmrdict:
-                xfmridx = xfmrdict[conlabel]
-                net.trafo.in_service[xfmridx] = False
-            else:
-                print('LINE OR TRANSFORMER NOT FOUND ......................................', conlabel)
-            pp.runpp(net, init='auto', max_iteration=ITMXN, calculate_voltage_angles=True)
-
-            # -- CONTINGENCY RESULTS FROM SOLUTION ----------------------------
-            bus_results = net.res_bus
-            shunt_data = net.shunt
-            gen_results = net.res_gen
-            extgrid_results = net.res_ext_grid
-
-            # -- WRITE CONTINGENCY BUS AND GENERATOR RESULTS TO FILE ----------
-            conlabel = "'" + outagedict['branch'][j] + "'"
-            bus_results = write_bus_results(outfname2, bus_results, fx_dict, sw_dict, gen_results, shunt_data, conlabel, ext_grid_bus)
-            gen_results, pgens = write_gen_results(outfname2, gen_results, gids, genbuses, base_pgens, extgrid_results, swingbus, ext_grid_bus)
-
-        print('DONE WITH CONTINGENCIES POWER FLOW .................................', round(time.time() - start_time, 1))
+    # print('SOLVING BASECASE POWER FLOW ........................................')
+    # pp.runpp(net, init='auto', max_iteration=ITMXN, calculate_voltage_angles=True, enforce_q_lims=True)
+    # base_net = copy.deepcopy(net)
+    #
+    # base_ex_pgen = net.res_ext_grid.loc[ext_grid_bus, 'p_kw']
+    # base_pgens = sum([x for x in net.res_gen['p_kw'].values if x != 0.0]) + base_ex_pgen
+    #
+    # # -- TODO not needed in production
+    # # -- WRITE BASECASE BUS AND GENERATOR RESULTS TO FILE -----------------
+    # write_base_bus_results(base_outfname1, net.res_bus, fxidxdict, swidxdict, net.res_gen, net.shunt, ext_grid_bus)
+    # base_pgens_mw = write_base_gen_results(base_outfname1, net.res_gen, gids, genbuses, net.res_ext_grid, swingbus, ext_grid_bus, swidxs)
+    #
+    # print('DONE WITH BASECASE POWER FLOW.......................................', round(time.time() - start_time, 1))
+    #
+    # # =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
+    # # -- PROCESS POWER FLOW CONTINGENCIES  --------------------------------
+    # # =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
+    # deltap_dict = {}
+    # start_time = time.time()
+    # if outagedict['gen']:
+    #     print('RUNNING GENERATOR OUTAGES ..........................................')
+    #     for genkey in outagedict['gen']:
+    #         net = copy.deepcopy(base_net)
+    #         conlabel = outagedict['gen'][genkey]
+    #         if genkey in genidxdict:
+    #             genidx = genidxdict[genkey]
+    #             net.gen.in_service[genidx] = False
+    #         else:
+    #             print('GENERATOR NOT FOUND ................................................', conlabel)
+    #         pp.runpp(net, init='auto', max_iteration=ITMXN, calculate_voltage_angles=True, enforce_q_lims=True)
+    #
+    #         # -- CALCULATE CHANGE IN GENERATION COMPARED TO BASECASE  -------------
+    #         ex_pgen = net.res_ext_grid.loc[ext_grid_bus, 'p_kw']
+    #         # print(net.res_gen)
+    #         con_pgens = sum([x for x in net.res_gen['p_kw'].values if x != 0.0]) + ex_pgen
+    #         deltap = con_pgens - base_pgens
+    #         deltap_dict.update({conlabel: deltap})
+    #
+    #         # -- TODO not needed in production
+    #         # -- WRITE CONTINGENCY BUS AND GENERATOR RESULTS TO FILE --------------
+    #         conlabel = "'" + outagedict['gen'][genkey] + "'"
+    #         write_bus_results(base_outfname2, net.res_bus, fxidxdict, swidxdict, net.res_gen, net.shunt, conlabel, ext_grid_bus)
+    #         write_gen_results(base_outfname2, net.res_gen, gids, genbuses, base_pgens_mw, net.res_ext_grid, swingbus, ext_grid_bus, swidxs)
+    #
+    # if outagedict['branch']:
+    #     print('RUNNING LINE AND TRANSFORMER OUTAGES ...............................')
+    #     for branchkey in outagedict['branch']:
+    #         net = copy.deepcopy(base_net)
+    #         conlabel = outagedict['branch'][branchkey]
+    #         if branchkey in linedict:
+    #             lineidx = linedict[branchkey]
+    #             net.line.in_service[lineidx] = False
+    #         elif branchkey in xfmrdict:
+    #             xfmridx = xfmrdict[branchkey]
+    #             net.trafo.in_service[xfmridx] = False
+    #         else:
+    #             print('LINE OR TRANSFORMER NOT FOUND ......................................', branchkey)
+    #         pp.runpp(net, init='auto', max_iteration=ITMXN, calculate_voltage_angles=True)
+    #
+    #         # -- CALCULATE CHANGE IN GENERATION COMPARED TO BASECASE  -------------
+    #         ex_pgen = net.res_ext_grid.loc[ext_grid_bus, 'p_kw']
+    #         con_pgens = sum([x for x in net.res_gen['p_kw'].values if x != 0.0]) + ex_pgen
+    #
+    #         # print(con_pgens, base_pgens)
+    #         deltap = con_pgens - base_pgens
+    #         deltap_dict.update({conlabel: deltap})
+    #
+    #         # -- TODO not needed in production
+    #         # -- WRITE CONTINGENCY BUS AND GENERATOR RESULTS TO FILE ----------
+    #         conlabel = "'" + outagedict['branch'][branchkey] + "'"
+    #         write_bus_results(base_outfname2, net.res_bus, fxidxdict, swidxdict, net.res_gen, net.shunt, conlabel, ext_grid_bus)
+    #         write_gen_results(base_outfname2, net.res_gen, gids, genbuses, base_pgens_mw, net.res_ext_grid, swingbus, ext_grid_bus, swidxs)
+    #
+    # # for j in deltap_dict:
+    # #     print(j, deltap_dict[j])
+    # print('DONE WITH CONTINGENCIES POWER FLOW .................................', round(time.time() - start_time, 1))
 
     # =========================================================================
     # -- PROCESS BASECASE OPTIMAL POWER FLOW ----------------------------------
     # =========================================================================
-    if RUN_OPF:
-        # -- SOLVE BASECASE OPTIMAL POWER FLOW --------------------------------
-        print('SOLVING BASECASE OPTIMAL POWER FLOW ................................')
-        pp.runopp(net,  init='flat', calculate_voltage_angles=True, verbose=False, suppress_warnings=True)
+    print('--------------------------------------------------------------------')
+    print('------------------------ OPTIMAL POWER FLOW ------------------------')
+    print('--------------------------------------------------------------------')
 
-        # -- PARTICIPATING GENERATORS Pmin = max(Pgen + reserve, Pmin) --------
-        for gbus in genbuses:
-            if gbus in greservedict:
-                reserve = greservedict[gbus]
-                pgen = net.res_gen.loc[gbus]['p_kw']
-                pmin = net.gen.loc[gbus]['min_p_kw']
-                new_pmin = max(pgen + reserve, pmin)
-                net.gen.loc[gbus, 'min_p_kw'] = new_pmin
+    # -- SOLVE BASECASE OPTIMAL POWER FLOW --------------------------------
+    print('SOLVING BASECASE OPTIMAL POWER FLOW ................................')
+    pp.runopp(net,  init='flat', calculate_voltage_angles=True, verbose=False, suppress_warnings=True)
 
-        # -- COPY BASE CASE NETWORK FOR CONTINGENCY INITIALIZATION ------------
-        opf_base_net = copy.deepcopy(net)
+    # -- PARTICIPATING GENERATORS Pmin = max(Pgen + pfactor * pdelta, Pmin) --------
+    # for gbus in genbuses:
+    #     if gbus in pfactor_dict:
+    #         pfactor = pfactor_dict[gbus]
+    #         # TODO ----------- get gen index
+    #         pgen = net.res_gen.loc[gbus]['p_kw']
+    #         pmin = net.gen.loc[gbus]['min_p_kw']
+    #         new_pmin = max(pgen + pfactor, pmin)
+    #         net.gen.loc[gbus, 'min_p_kw'] = new_pmin
 
-        # -- GET BASECASE OPF RESULTS FROM SOLUTION ---------------------------
-        base_shunt_results = net.shunt
-        base_gen_results = net.res_gen
-        base_bus_results = net.res_bus
-        base_extgrid_results = net.res_ext_grid
+    # -- COPY BASE CASE NETWORK FOR CONTINGENCY INITIALIZATION ------------
+    opf_base_net = copy.deepcopy(net)
 
-        # -- DEVELOPEMENT -----------------------------------------------------
-        # print_dataframes_results(net)
+    # -- DEVELOPEMENT -----------------------------------------------------
+    # print_dataframes_results(net)
 
-        # -- WRITE BASECASE BUS AND GENERATOR RESULTS TO FILE -----------------
-        base_bus_results = write_base_bus_results(outfname1, base_bus_results, fx_dict, sw_dict, base_gen_results, base_shunt_results, ext_grid_bus)
-        base_gen_results, base_pgens = write_base_gen_results(outfname1, base_gen_results, gids, genbuses, base_extgrid_results, swingbus, ext_grid_bus)
-        print('DONE WITH BASECASE OPTIMAL POWER FLOW...............................', round(time.time() - start_time, 1))
-        print()
+    # -- WRITE BASECASE BUS AND GENERATOR RESULTS TO FILE -----------------
+    write_base_bus_results(outfname1, net.res_bus, fxidxdict, swidxdict, net.res_gen, net.shunt, ext_grid_bus)
+    base_pgens = write_base_gen_results(outfname1, net.res_gen, gids, genbuses, net.res_ext_grid, swingbus, ext_grid_bus, swidxs)
+    print('DONE WITH BASECASE OPTIMAL POWER FLOW...............................', round(time.time() - start_time, 1))
 
-        # =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
-        # -- PROCESS OPF CONTINGENCIES ----------------------------------------
-        # =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
-        start_time = time.time()
-        if outagedict['gen']:
-            print('RUNNING OPF GENERATOR OUTAGES ......................................')
-        for j in outagedict['gen']:
+    # =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
+    # -- PROCESS OPF CONTINGENCIES ----------------------------------------
+    # =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
+    start_time = time.time()
+    if outagedict['gen']:
+        print('RUNNING OPF GENERATOR OUTAGES ......................................')
+        for genkey in outagedict['gen']:
             net = copy.deepcopy(opf_base_net)
-            conlabel = outagedict['gen'][j]
-            if conlabel in gendict:
-                genidx = gendict[conlabel]
+            conlabel = outagedict['gen'][genkey]
+            if genkey in genidxdict:
+                genidx = genidxdict[genkey]
                 net.gen.in_service[genidx] = False
             else:
                 print('GENERATOR NOT FOUND ................................................', conlabel)
             pp.runopp(net, init='flat', calculate_voltage_angles=True, verbose=True, suppress_warnings=True)
 
-            # -- CONTINGENCY RESULTS FROM SOLUTION ----------------------------
-            bus_results = net.res_bus
-            shunt_data = net.shunt
-            gen_results = net.res_gen
-            extgrid_results = net.res_ext_grid
-
             # -- WRITE CONTINGENCY BUS AND GENERATOR RESULTS TO FILE ----------
-            conlabel = "'" + outagedict['gen'][j] + "'"
-            bus_results = write_bus_results(outfname2, bus_results, fx_dict, sw_dict, gen_results, shunt_data, conlabel, ext_grid_bus)
-            gen_results, pgens = write_gen_results(outfname2, gen_results, gids, genbuses, base_pgens, extgrid_results, swingbus, ext_grid_bus)
+            conlabel = "'" + outagedict['gen'][genkey] + "'"
+            write_bus_results(outfname2, net.res_bus, fxidxdict, swidxdict, net.res_gen, net.shunt, conlabel, ext_grid_bus)
+            write_gen_results(outfname2, net.res_gen, gids, genbuses, base_pgens, net.res_ext_grid, swingbus, ext_grid_bus, swidxs)
 
-        if outagedict['branch']:
-            print('RUNNING OPF LINE AND TRANSFORMER OUTAGES ...........................')
-        for j in outagedict['branch']:
+    if outagedict['branch']:
+        print('RUNNING OPF LINE AND TRANSFORMER OUTAGES ...........................')
+        for branchkey in outagedict['branch']:
             net = copy.deepcopy(opf_base_net)
-            conlabel = outagedict['branch'][j]
-            if conlabel in linedict:
-                lineidx = linedict[conlabel]
+            conlabel = outagedict['branch'][branchkey]
+            if branchkey in linedict:
+                lineidx = linedict[branchkey]
                 net.line.in_service[lineidx] = False
-            elif conlabel in xfmrdict:
-                xfmridx = xfmrdict[conlabel]
+            elif branchkey in xfmrdict:
+                xfmridx = xfmrdict[branchkey]
                 net.trafo.in_service[xfmridx] = False
             else:
                 print('LINE OR TRANSFORMER NOT FOUND ......................................', conlabel)
@@ -1141,34 +1199,10 @@ if __name__ == "__main__":
             # -- DEVELOPEMENT -----------------------------------------------------
             # print_dataframes_results(net)
 
-            # -- CONTINGENCY RESULTS FROM SOLUTION ----------------------------
-            bus_results = net.res_bus
-            shunt_data = net.shunt
-            gen_results = net.res_gen
-            extgrid_results = net.res_ext_grid
-
             # -- WRITE CONTINGENCY BUS AND GENERATOR RESULTS TO FILE ----------
-            conlabel = "'" + outagedict['branch'][j] + "'"
-            bus_results = write_bus_results(outfname2, bus_results, fx_dict, sw_dict, gen_results, shunt_data, conlabel, ext_grid_bus)
-            gen_results, pgens = write_gen_results(outfname2, gen_results, gids, genbuses, base_pgens, extgrid_results, swingbus, ext_grid_bus)
+            conlabel = "'" + outagedict['branch'][branchkey] + "'"
+            write_bus_results(outfname2, net.res_bus, fxidxdict, swidxdict, net.res_gen, net.shunt, conlabel, ext_grid_bus)
+            write_gen_results(outfname2, net.res_gen, gids, genbuses, base_pgens, net.res_ext_grid, swingbus, ext_grid_bus, swidxs)
 
     print('DONE WITH OPF CONTINGENCIES ........................................', round(time.time() - start_time, 1))
-
-    # -- GET LAST OUTAGE GENERATOR COST ---------------------------------------
-    total_cost = 0.0
-    gidxs = gendict.keys()
-    gbuses = net.gen['bus'].values
-    for gbus in gbuses:
-        gkey = net.gen.loc[gbus, 'name']
-        pgen = -1e3 * net.res_gen.loc[gbus, 'mw']
-        # print(pgen, gkey)
-        disptablekey = genopfdict[gkey]
-        costtablekey = gdispdict[disptablekey]
-        pcostdata = pwlcostdata[costtablekey]
-        p = [x[0] for x in pcostdata]
-        c = [x[1] for x in pcostdata]
-        cost = numpy.interp(pgen, p, c)
-        total_cost += cost
-    print()
-    print('TOTAL COST =', round(total_cost, 2))
 
