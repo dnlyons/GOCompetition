@@ -1115,21 +1115,20 @@ if __name__ == "__main__":
     except FileNotFoundError:
         pass
 
-    print('SOLVING NETWORK ....................................................', end=' ', flush=True)
+    # -- SOLVE INITIAL NETWORK WITH STRAIGHT POWERFLOW ------------------------
     solve_starttime = time.time()
     pp.runpp(net_a, init='auto', max_iteration=ITMXN, calculate_voltage_angles=True, enforce_q_lims=True)
     net_a.gen['p_kw'] = net_a.res_gen['p_kw']
     pp.runpp(net_c, init='auto', max_iteration=ITMXN, calculate_voltage_angles=True, enforce_q_lims=True)
     net_c.gen['p_kw'] = net_c.res_gen['p_kw']
-    print(round(time.time() - solve_starttime, 3))
+    print('INITIAL NETWORK SOLVED .............................................', round(time.time() - solve_starttime, 3))
 
     # =========================================================================
     # -- PROCESS BASECASE OPTIMAL POWER FLOW ----------------------------------
     # =========================================================================
-    print('SOLVING BASECASE RATEA OPTIMAL POWER FLOW ..........................', end=' ', flush=True)
     solve_starttime = time.time()
     pp.runopp(net_a, init='flat', calculate_voltage_angles=True, verbose=False, suppress_warnings=True, enforce_q_lims=False)
-    print(round(time.time() - solve_starttime, 3))
+    print('BASECASE RATEA OPTIMAL POWER FLOW SOLVED ...........................', round(time.time() - solve_starttime, 3))
     # print_dataframes_results(net_a)
 
     # -- GET TOTAL BASECASE GENERATION ----------------------------------------
@@ -1144,20 +1143,19 @@ if __name__ == "__main__":
     write_base_gen_results(outfname1, gen_results, gids, genbuses, ext_grid_results, ext_grid_idx, swshidxs, swinggen_idxs)
 
     # -- RUN & COPY RATEC BASE CASE NETWORK FOR CONTINGENCY INITIALIZATION ----
-    print('SOLVING BASECASE RATEC OPTIMAL POWER FLOW ..........................', end=' ', flush=True)
     solve_starttime = time.time()
     pp.runopp(net_c, init='flat', calculate_voltage_angles=True, verbose=False, suppress_warnings=True)
     net_c.gen['p_kw'] = net_c.res_gen['p_kw']
     base_net = copy.deepcopy(net_c)
-    print(round(time.time() - solve_starttime, 3))
+    print('BASECASE RATEC OPTIMAL POWER FLOW SOLVED ...........................', round(time.time() - solve_starttime, 3))
 
-    # =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
-    # -- PROCESS STRAIGHT POWER FLOW CONTINGENCIES (FOR PGEN ESTIMATE)  ---
-    # =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
-    print('--------------------- CONTINGENCY POWER FLOW -----------------------')
+    # =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
+    # -- PROCESS STRAIGHT POWER FLOW CONTINGENCIES (FOR PGEN ESTIMATE) --------
+    # =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
+    print('====================== CONTINGENCY POWER FLOW ======================')
     deltap_dict = {}
+    # -- RUN GENERATOR OUTAGES ------------------------------------------------
     if outagedict['gen']:
-        print('RUNNING GENERATOR OUTAGES ..........................................', end=' ', flush=True)
         gstarttime = time.time()
         for genkey in outagedict['gen']:
             net = copy.deepcopy(base_net)
@@ -1184,10 +1182,10 @@ if __name__ == "__main__":
             # conlabel = "'" + outagedict['gen'][genkey] + "'"
             # write_bus_results('straight_solution2', bus_results, swshidxdict, gen_results, conlabel, ext_grid_idx)
             # write_gen_results('straight_solution2', gen_results, gids, genbuses, base_pgens, ext_grid_results, ext_grid_idx, swshidxs, swinggen_idxs, pgen_outage)
-        print(round(time.time() - gstarttime, 3))
+        print('GENERATOR OUTAGES SOLVED ...........................................', round(time.time() - gstarttime, 3))
 
+    # -- RUN LINE AND TRANSFORMER OUTAGES -------------------------------------
     if outagedict['branch']:
-        print('RUNNING LINE AND TRANSFORMER OUTAGES ...............................', end=' ', flush=True)
         lxstarttime = time.time()
         for branchkey in outagedict['branch']:
             net = copy.deepcopy(base_net)
@@ -1216,15 +1214,15 @@ if __name__ == "__main__":
             # conlabel = "'" + outagedict['branch'][branchkey] + "'"
             # write_bus_results('straight_solution2', bus_results, swshidxdict, gen_results, conlabel, ext_grid_idx)
             # write_gen_results('straight_solution2', gen_results, gids, genbuses, base_pgens, ext_grid_results, ext_grid_idx, swshidxs, swinggen_idxs, 0.0)
-        print(round(time.time() - lxstarttime, 3))
+        print('LINE AND TRANSFORMER OUTAGES SOLVED ................................', round(time.time() - lxstarttime, 3))
 
-    # =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
-    # -- PROCESS OPF CONTINGENCIES ----------------------------------------
-    # =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
-    print('------------------ CONTINGENCY OPTIMAL POWER FLOW ------------------')
-    opf_starttime = time.time()
+    # =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
+    # -- PROCESS OPF CONTINGENCIES --------------------------------------------
+    # =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
+    print('================== CONTINGENCY OPTIMAL POWER FLOW ==================')
+    # -- RUN OPF GENERATOR OUTAGES --------------------------------------------
     if outagedict['gen']:
-        print('RUNNING OPF GENERATOR OUTAGES ......................................')
+        opfgtarttime = time.time()
         for genkey in outagedict['gen']:
             net = copy.deepcopy(base_net)
             conlabel = outagedict['gen'][genkey]
@@ -1278,9 +1276,11 @@ if __name__ == "__main__":
             conlabel = "'" + outagedict['gen'][genkey] + "'"
             write_bus_results(outfname2, bus_results, swshidxdict, gen_results, conlabel, ext_grid_idx)
             write_gen_results(outfname2, gen_results, gids, genbuses, base_pgens, ext_grid_results, ext_grid_idx, swshidxs, swinggen_idxs, pgen_outage)
+        print('OPF GENERATOR OUTAGES SOLVED .......................................', round(time.time() - opfgtarttime, 3))
 
+    # -- RUN OPF LINE AND TRANSFORMER OUTAGES ---------------------------------
     if outagedict['branch']:
-        print('RUNNING OPF LINE AND TRANSFORMER OUTAGES ...........................')
+        opflxstarttime = time.time()
         for branchkey in outagedict['branch']:
             net = copy.deepcopy(base_net)
             conlabel = outagedict['branch'][branchkey]
@@ -1295,6 +1295,34 @@ if __name__ == "__main__":
                 continue
 
             # -- TODO limit pmax and pmin according to pfactor here then run
+            # for gen_pkey in participation_dict:
+            #     gidx = genidxdict[gen_pkey]
+            #     pfactor = participation_dict[gen_pkey]
+            #     pgen = net.res_gen.loc[gidx, 'p_kw']
+            #     pmin = net.gen.loc[gidx, 'min_p_kw']
+            #     pmax = net.gen.loc[gidx, 'max_p_kw']
+            #     p_limit = pgen + pfactor * deltap_estimate
+            #
+            #     if deltap_estimate > 0.0:
+            #         net.gen.loc[gidx, 'max_p_kw'] = min(pmax, p_limit)
+            #         # if p_limit > pmax:
+            #         #     print('OUTAGE = ', genkey)
+            #         #     print('PARTICIPATING GENERATOR =', gen_pkey, 'PGEN =', pgen)
+            #         #     print('PFACTOR =', pfactor, 'DELTAP ESTIMATE =', deltap_estimate)
+            #         #     print('REQUESTED PMAX =', p_limit)
+            #         #     print('PMIN =',  pmin)
+            #         #     print('PMAX =',  pmax)
+            #         #     print('PMAX_LIMIT =', min(pmax, p_limit))
+            #
+            #     elif deltap_estimate < 0.0:
+            #         net.gen.loc[gidx, 'min_p_kw'] = max(pmin, p_limit)
+            #         # if p_limit < pmin:
+            #         #     print('PARTICIPATING GENERATOR =', gen_pkey, 'PGEN =', pgen)
+            #         #     print('PFACTOR =', pfactor, 'DELTAP ESTIMATE =', deltap_estimate)
+            #         #     print('REQUESTED PMIN =',  p_limit)
+            #         #     print('PMIN =', pmin)
+            #         #     print('PMAX =', pmax)
+            #         #     print('PMIN_LIMIT =', max(pmin, p_limit))
 
             pp.runopp(net, init='flat', calculate_voltage_angles=True, verbose=False, suppress_warnings=True)
 
@@ -1306,7 +1334,9 @@ if __name__ == "__main__":
             conlabel = "'" + outagedict['branch'][branchkey] + "'"
             write_bus_results(outfname2, bus_results, swshidxdict, gen_results, conlabel, ext_grid_idx)
             write_gen_results(outfname2, gen_results, gids, genbuses, base_pgens, ext_grid_results, ext_grid_idx, swshidxs, swinggen_idxs, 0.0)
+        print('OPF LINE AND TRANSFORMER OUTAGES SOLVED ............................', round(time.time() - opflxstarttime, 3))
 
-    print('DONE WITH OPF CONTINGENCIES ........................................', round(time.time() - opf_starttime, 3))
-    print('')
+    # print('DONE WITH OPF CONTINGENCIES ........................................', round(time.time() - opf_starttime, 3))
+    print('=========================== DONE ===================================')
+    print()
     print('TOTAL TIME -------------------------------------------------------->', round(time.time() - start_time, 3))
