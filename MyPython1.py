@@ -1,4 +1,3 @@
-#!python3.6
 import os
 import sys
 import csv
@@ -30,9 +29,19 @@ if sys.argv[1:]:
     outfname1 = 'solution1.txt'
     outfname2 = 'solution2.txt'
 
-BASERATING = 2       # contingency line and xfmr ratings 0=RateA, 1=RateB, 2=RateC
-CONRATING = 2       # contingency line and xfmr ratings 0=RateA, 1=RateB, 2=RateC
-ITMXN = 40          # max iterations solve option
+try:
+    os.remove(outfname1)
+except FileNotFoundError:
+    pass
+try:
+    os.remove(outfname2)
+except FileNotFoundError:
+    pass
+
+BASERATING = 0          # contingency line and xfmr ratings 0=RateA, 1=RateB, 2=RateC
+CONRATING = 2           # contingency line and xfmr ratings 0=RateA, 1=RateB, 2=RateC
+
+# ITMXN = 40          # max iterations solve option
 
 
 # =============================================================================
@@ -475,16 +484,10 @@ def write_base_bus_results(fname, b_results, sw_dict, g_results, exgridbus):
     return
 
 
-def write_base_gen_results(fname, g_results, genids, gbuses, e_results, exgrid_idx, swsh_idxs, swgen_idxs):
+def write_base_gen_results(fname, g_results, genids, gbuses, swsh_idxs):
     g_results.drop(swsh_idxs, inplace=True)
     del g_results['vm_pu']
     del g_results['va_degree']
-    # -- COMBINE SWING GENERATOR AND EXTERNAL GRID CONTRIBUTIONS --------------
-    ex_kw = e_results.loc[exgrid_idx, 'p_kw']
-    ex_kvar = e_results.loc[exgrid_idx, 'q_kvar']
-    for idx in swgen_idxs:
-        g_results.loc[idx, 'p_kw'] += ex_kw / len(swgen_idxs)
-        g_results.loc[idx, 'q_kvar'] += ex_kvar / len(swgen_idxs)
     # -- CONVERT BACK TO MW AND MVARS -----------------------------------------
     g_results['p_kw'] *= -1e-3
     g_results['q_kvar'] *= -1e-3
@@ -495,8 +498,6 @@ def write_base_gen_results(fname, g_results, genids, gbuses, e_results, exgrid_i
     # -- ADD GENERATOR BUSNUMBERS AND IDS -------------------------------------
     g_results.insert(0, 'id', genids)
     g_results.insert(0, 'bus', gbuses)
-    # -- CALCULATE TOTAL POWER OF PARTICIPATING GENERATORS --------------------
-    pgenerators = sum([x for x in g_results['mw'].values if x != 0.0])
     # -- CONVERT PANDAS DATAFRAME TO LIST FOR REPORTING -----------------------
     glist = [g_results.columns.values.tolist()] + g_results.values.tolist()
     # -- WRITE THE GENERATION RESULTS TO FILE ---------------------------------
@@ -504,7 +505,7 @@ def write_base_gen_results(fname, g_results, genids, gbuses, e_results, exgrid_i
     return
 
 
-def write_bus_results(fname, b_results, sw_dict, g_results, clabel, exgridbus):
+def write_bus_results(fname, b_results, sw_dict, g_results, exgridbus, clabel):
     # -- DELETE UNUSED DATAFRAME COLUMNS --------------------------------------
     try:
         del b_results['p_kw']        # not used for reporting
@@ -550,35 +551,28 @@ def write_bus_results(fname, b_results, sw_dict, g_results, clabel, exgridbus):
     return
 
 
-def write_gen_results(fname, g_results, genids, gbuses, b_pgens, e_results, exgrid_idx, swsh_idxs, swgen_idxs, pgen_out):
+def write_gen_results(fname, g_results, genids, gbuses, p_delta, swsh_idxs, pgen_out):
     g_results.drop(swsh_idxs, inplace=True)
     del g_results['vm_pu']
     del g_results['va_degree']
-    # -- COMBINE SWING GENERATOR AND EXTERNAL GRID CONTRIBUTIONS --------------
-    ex_kw = e_results.loc[exgrid_idx, 'p_kw']
-    ex_kvar = e_results.loc[exgrid_idx, 'q_kvar']
-    for idx in swgen_idxs:
-        g_results.loc[idx, 'p_kw'] += ex_kw / len(swgen_idxs)
-        g_results.loc[idx, 'q_kvar'] += ex_kvar / len(swgen_idxs)
     # -- CONVERT BACK TO MW AND MVARS -----------------------------------------
     g_results['p_kw'] *= -1e-3
     g_results['q_kvar'] *= -1e-3
     g_results['p_kw'] += 0.0
     g_results['q_kvar'] += 0.0
-    b_pgens *= -1e-3
+    p_delta *= -1e-3
     pgen_out *= -1e-3
     # -- RENAME COLUMN HEADINGS -----------------------------------------------
     g_results.rename(columns={'p_kw': 'mw', 'q_kvar': 'mvar'}, inplace=True)
     # -- ADD GENERATOR BUSNUMBERS AND IDS -------------------------------------
     g_results.insert(0, 'id', genids)
-    g_results.insert(0, 'bus', gbuses)
-    # -- CALCULATE TOTAL POWER OF PARTICIPATING GENERATORS --------------------
-    c_gens = sum([x for x in g_results['mw'].values if x != 0.0])
+    g_results.insert(0, 'bus', gbuses)    # -- CALCULATE TOTAL POWER OF PARTICIPATING GENERATORS --------------------
+    c_gens = sum([x for x in g_results['mw'].values])
     # -- CONVERT PANDAS DATAFRAME TO LIST FOR REPORTING -----------------------
     glist = [g_results.columns.values.tolist()] + g_results.values.tolist()
     # -- WRITE THE GENERATION RESULTS TO FILE ---------------------------------
     write_csvdata(fname, glist, [['--generator section']])
-    deltapgens = c_gens - b_pgens + pgen_out
+    deltapgens = p_delta + pgen_out
     write_csvdata(fname, [], [['--delta section'], ['delta_p'], [deltapgens]])
     return
 
@@ -650,14 +644,14 @@ def print_dataframes_results(_net):
     # print('LINE DATAFRAME')
     # print(_net.line)
     # print()
-    print('LINE RESULTS')
-    print(_net.res_line)
-    print()
+    # print('LINE RESULTS')
+    # print(_net.res_line)
+    # print()
     # print('TRANSFORMER DATAFRAME')
     # print(_net.trafo)
     # print()
-    print('TRANSFORMER RESULTS')
-    print(_net.res_trafo)
+    # print('TRANSFORMER RESULTS')
+    # print(_net.res_trafo)
     print()
     print('GENERATOR DATAFRAME')
     print(_net.gen)
@@ -667,17 +661,17 @@ def print_dataframes_results(_net):
     # print()
     # print('EXT GRID DATAFRAME')
     # print(_net.ext_grid)
-    print()
+    # print()
     print('EXT GRID RESULTS')
     print(_net.res_ext_grid)
-    print()
+    # print()
     return
 
 
 def get_branch_losses(line_res,  trafo_res):
     losses = 0.0
     pfrom = line_res['p_from_kw'].values
-    pto = net.res_line['p_to_kw'].values
+    pto = line_res['p_to_kw'].values
     line_losses = numpy.add(pfrom, pto)
     line_losses = [abs(x) for x in line_losses]
     line_losses = sum(line_losses)
@@ -742,6 +736,7 @@ if __name__ == "__main__":
     gdispdict = format_powerdispdata(rop_powerdispdata)
     pwlcostdata = format_pwlcostdata(rop_pwlcostdata)
 
+
     # =========================================================================
     # -- PARSE THE INL FILE ---------------------------------------------------
     # =========================================================================
@@ -772,10 +767,12 @@ if __name__ == "__main__":
         busarea = data[4]
         buszone = data[5]
         buskv = data[7]
-        vmax = data[11]
-        vmin = data[12]
-        pp.create_bus(net_a, vn_kv=busnomkv, name=busname, index=busnum, type="b", zone=buszone, in_service=status, max_vm_pu=vmax, min_vm_pu=vmin)
-        idx = pp.create_bus(net_c, vn_kv=busnomkv, name=busname, index=busnum, type="b", zone=buszone, in_service=status, max_vm_pu=vmax, min_vm_pu=vmin)
+        vmax_a = data[9]
+        vmin_a = data[10]
+        vmax_c = data[11]
+        vmin_c = data[12]
+        pp.create_bus(net_a, vn_kv=busnomkv, name=busname, index=busnum, type="b", zone=buszone, in_service=status, max_vm_pu=vmax_a, min_vm_pu=vmin_a)
+        idx = pp.create_bus(net_c, vn_kv=busnomkv, name=busname, index=busnum, type="b", zone=buszone, in_service=status, max_vm_pu=vmax_c, min_vm_pu=vmin_c)
         if busnum == swingbus:
             swingbus_idx = idx
         busnomkvdict.update({busnum: busnomkv})
@@ -813,6 +810,7 @@ if __name__ == "__main__":
     genbus_dict = {}
     genarea_dict = {}
     genzone_dict = {}
+    genidxs = []
     # -- ADD SWING GENERATOR --------------------------------------------------
     # -- swinggens_data = [sw_key, sw_id, vreg_sw, sw_pgen, sw_pmin, sw_pmax, sw_qgen, sw_qmin, sw_qmax, sw_status]
     for swgen_data in swinggens_data:
@@ -820,12 +818,12 @@ if __name__ == "__main__":
         genkey = swgen_data[0]
         gid = swgen_data[1]
         vreg = swgen_data[2]
-        pgen = swgen_data[3]
-        pmin = swgen_data[4]
-        pmax = swgen_data[5]
-        qgen = swgen_data[6]
-        qmin = swgen_data[7]
-        qmax = swgen_data[8]
+        pgen = round(swgen_data[3], 6)
+        pmin = round(swgen_data[4], 6)
+        pmax = round(swgen_data[5], 6)
+        qgen = round(swgen_data[6], 6)
+        qmin = round(swgen_data[7], 6)
+        qmax = round(swgen_data[8], 6)
         status = bool(swgen_data[9])
         genkva = math.sqrt(pmin **2 + qmin ** 2)
         gen_status_vreg_dict.update({genbus: [False, vreg]})
@@ -834,11 +832,12 @@ if __name__ == "__main__":
             disptablekey = genopfdict[genkey]
             costtablekey = gdispdict[disptablekey]
             pcostdata = numpy.array(pwlcostdata[costtablekey])
+
             idx = pp.create_gen(net_a, genbus, pgen, vm_pu=vreg, name=genkey, min_p_kw=pmin, max_p_kw=pmax, min_q_kvar=qmin, max_q_kvar=qmax,
-                                controllable=True, in_service=status, type='sync', sn_kva=genkva)
+                                controllable=True, in_service=status, sn_kva=genkva)
             pp.create_piecewise_linear_cost(net_a, idx, 'gen', pcostdata, type='p')
             pp.create_gen(net_c, genbus, pgen, vm_pu=vreg, name=genkey, min_p_kw=pmin, max_p_kw=pmax, min_q_kvar=qmin, max_q_kvar=qmax,
-                          controllable=True, in_service=status, type='sync', index=idx, sn_kva=genkva)
+                          controllable=True, in_service=status, index=idx, sn_kva=genkva)
             pp.create_piecewise_linear_cost(net_c, idx, 'gen', pcostdata, type='p')
 
             if genkey in participation_dict:
@@ -846,9 +845,9 @@ if __name__ == "__main__":
                 pfactor_dict.update({genkey: pfactor})
         else:
             idx = pp.create_gen(net_a, genbus, pgen, vm_pu=vreg, name=genkey, min_p_kw=pmin, max_p_kw=pmax, min_q_kvar=qmin, max_q_kvar=qmax,
-                                controllable=False, in_service=status, type='sync', sn_kva=genkva)
+                                controllable=False, in_service=status, sn_kva=genkva)
             pp.create_gen(net_c, genbus, pgen, vm_pu=vreg, name=genkey, min_p_kw=pmin, max_p_kw=pmax, min_q_kvar=qmin, max_q_kvar=qmax,
-                          controllable=False, in_service=status, type='sync', index=idx, sn_kva=genkva)
+                          controllable=False, in_service=status, index=idx, sn_kva=genkva)
 
         swing_vreg = vreg
         if status:
@@ -860,18 +859,19 @@ if __name__ == "__main__":
         genbus_dict.update({genkey: genbus})
         genarea_dict.update({genkey: busarea_dict[genbus]})
         genzone_dict.update({genkey: buszone_dict[genbus]})
+        genidxs.append(idx)
 
     # -- ADD REMAINING GENERATOR ----------------------------------------------
     for data in gendata:
         genbus = data[0]
         gid = data[1]
-        pgen = data[2]
-        qgen = data[3]
-        qmin = data[4]
-        qmax = data[5]
-        vreg = data[6]
-        pmin = data[16]
-        pmax = data[17]
+        vreg = round(data[6], 6)
+        pgen = round(data[2], 6)
+        qgen = round(data[3], 6)
+        qmin = round(data[4], 6)
+        qmax = round(data[5], 6)
+        pmin = round(data[16], 6)
+        pmax = round(data[17], 6)
         status = bool(data[14])
         genkva = math.sqrt(pmin **2 + qmin ** 2)
         gen_status_vreg_dict.update({genbus: [False, vreg]})
@@ -881,21 +881,23 @@ if __name__ == "__main__":
             disptablekey = genopfdict[genkey]
             costtablekey = gdispdict[disptablekey]
             pcostdata = numpy.array(pwlcostdata[costtablekey])
+
             idx = pp.create_gen(net_a, genbus, pgen, vm_pu=vreg, name=genkey, min_p_kw=pmin, max_p_kw=pmax, min_q_kvar=qmin, max_q_kvar=qmax,
-                                controllable=True, in_service=status, type='sync', sn_kva=genkva)
+                                controllable=True, in_service=status, sn_kva=genkva)
             pp.create_piecewise_linear_cost(net_a, idx, 'gen', pcostdata, type='p')
             pp.create_gen(net_c, genbus, pgen, vm_pu=vreg, name=genkey, min_p_kw=pmin, max_p_kw=pmax, min_q_kvar=qmin, max_q_kvar=qmax,
-                          controllable=True, in_service=status, type='sync', index=idx, sn_kva=genkva)
+                          controllable=True, in_service=status, index=idx, sn_kva=genkva)
             pp.create_piecewise_linear_cost(net_c, idx, 'gen', pcostdata, type='p')
 
             if genkey in participation_dict:
                 pfactor = participation_dict[genkey]
                 pfactor_dict.update({genkey: pfactor})
         else:
+
             idx = pp.create_gen(net_a, genbus, pgen, vm_pu=vreg, name=genkey, min_p_kw=pmin, max_p_kw=pmax, min_q_kvar=qmin, max_q_kvar=qmax,
-                                controllable=False, in_service=status, type='sync', sn_kva=genkva)
+                                controllable=False, in_service=status, sn_kva=genkva)
             pp.create_gen(net_c, genbus, pgen, vm_pu=vreg, name=genkey, min_p_kw=pmin, max_p_kw=pmax, min_q_kvar=qmin, max_q_kvar=qmax,
-                          controllable=False, in_service=status, type='sync', index=idx, sn_kva=genkva)
+                          controllable=False, in_service=status, index=idx, sn_kva=genkva)
 
         if status:
             gen_status_vreg_dict[genbus][0] = status
@@ -905,6 +907,7 @@ if __name__ == "__main__":
         genbus_dict.update({genkey: genbus})
         genarea_dict.update({genkey: busarea_dict[genbus]})
         genzone_dict.update({genkey: buszone_dict[genbus]})
+        genidxs.append(idx)
 
     # == ADD FIXED SHUNT DATA TO NETWORK ======================================
     # fixshunt = ['I', 'ID', 'STATUS', 'GL', 'BL']
@@ -1085,136 +1088,158 @@ if __name__ == "__main__":
             xfmrdict.update({xfmr2wkey: idx})
             xfmr_ratea_dict.update({xfmr2wkey: kva_rating_a})
 
-    # == ADD EXTERNAL GRID (PARALLEL TO SWING BUS) ============================
-    ext_grid_idx = pp.create_bus(net_a, vn_kv=swing_kv, name='Ex_Grid_Bus', in_service=True, max_vm_pu=swing_vhigh, min_vm_pu=swing_vlow)
-    pp.create_bus(net_c, vn_kv=swing_kv, name='Ex_Grid_Bus', in_service=True, max_vm_pu=swing_vhigh, min_vm_pu=swing_vlow, index=ext_grid_idx)
+    # == ADD EXTERNAL GRID ==== (RADIAL TIE TO RAW SWING BUS) =================
     ext_tie_rating = 1e5/(math.sqrt(3) * swing_kv)
-    tie_idx = pp.create_line_from_parameters(net_a, swingbus, ext_grid_idx, 1.0, 0.0, 0.002, 0.0, ext_tie_rating, name='Swing-Tie')
-    pp.create_line_from_parameters(net_c, swingbus, ext_grid_idx, 1.0, 0.0, 0.002, 0.0, ext_tie_rating, name='Swing-Tie', index=tie_idx)
+    # -- CREATE BASE NETWORK EXTERNAL GRID ------------------------------------
+    ext_grid_idx = pp.create_bus(net_a, vn_kv=swing_kv, name='Ex_Grid_Bus', in_service=True, max_vm_pu=swing_vhigh, min_vm_pu=swing_vlow)
+    tie_idx = pp.create_line_from_parameters(net_a, swingbus, ext_grid_idx, 1.0, 0.0, 0.1, 0.0, ext_tie_rating, name='Swing-Tie', max_loading_percent=100.0)
     pp.create_ext_grid(net_a, ext_grid_idx, vm_pu=swing_vreg, va_degree=swing_angle, min_p_kw=-1e9, max_p_kw=0.0,
                        min_q_kvar=-1e9, max_q_kvar=0.0, index=ext_grid_idx)
+    pp.create_polynomial_cost(net_a, ext_grid_idx, 'ext_grid', numpy.array([-1, 0]), type='p')
+    # -- CREATE CONTINGENCY NETWORK EXTERNAL GRID -----------------------------
+    pp.create_bus(net_c, vn_kv=swing_kv, name='Ex_Grid_Bus', in_service=True, max_vm_pu=swing_vhigh, min_vm_pu=swing_vlow, index=ext_grid_idx)
+    pp.create_line_from_parameters(net_c, swingbus, ext_grid_idx, 1.0, 0.0, 0.1, 0.0, ext_tie_rating, name='Swing-Tie', index=tie_idx)
     pp.create_ext_grid(net_c, ext_grid_idx, vm_pu=swing_vreg, va_degree=swing_angle, min_p_kw=-1e9, max_p_kw=0.0,
                        min_q_kvar=-1e9, max_q_kvar=0.0, index=ext_grid_idx)
-    pp.create_polynomial_cost(net_a, ext_grid_idx, 'ext_grid', numpy.array([-1, 0]), type='p')
     pp.create_polynomial_cost(net_c, ext_grid_idx, 'ext_grid', numpy.array([-1, 0]), type='p')
-
-    pp.create_polynomial_cost(net_a, ext_grid_idx, 'ext_grid', numpy.array([1, 0]), type='q')
-    pp.create_polynomial_cost(net_c, ext_grid_idx, 'ext_grid', numpy.array([1, 0]), type='q')
-
     print('====================== DONE CREATING NETWORK =======================', round(time.time() - create_starttime, 3))
-
-    # -- DIAGNOSTIC DEVELOPMENT -----------------------------------------------
-    # pp.diagnostic(net_a, report_style='detailed', warnings_only=False)
-
-    try:
-        os.remove(outfname1)
-    except FileNotFoundError:
-        pass
-    try:
-        os.remove(outfname2)
-    except FileNotFoundError:
-        pass
 
     # -- SOLVE INITIAL NETWORK WITH STRAIGHT POWERFLOW ------------------------
     solve_starttime = time.time()
-    pp.runpp(net_a, init='auto', max_iteration=ITMXN, calculate_voltage_angles=True, enforce_q_lims=True)
-    net_a.gen['p_kw'] = net_a.res_gen['p_kw']
-    pp.runpp(net_c, init='auto', max_iteration=ITMXN, calculate_voltage_angles=True, enforce_q_lims=True)
-    net_c.gen['p_kw'] = net_c.res_gen['p_kw']
+    pp.runpp(net_a, init='auto', enforce_q_lims=True)                           # solve initial base network
+    pp.runpp(net_c, init='auto', enforce_q_lims=True)                           # solve initial contingency network
     print('INITIAL NETWORK SOLVED .............................................', round(time.time() - solve_starttime, 3))
 
     # =========================================================================
     # -- PROCESS BASECASE OPTIMAL POWER FLOW ----------------------------------
     # =========================================================================
     solve_starttime = time.time()
-    pp.runopp(net_a, init='flat', calculate_voltage_angles=True, verbose=False, suppress_warnings=True, enforce_q_lims=False)
+    pp.runopp(net_a, init='pf')                                                 # run opf on base network
+    net_a.gen['p_kw'] = net_a.res_gen['p_kw']                                   # copy gens real power to dataframe
+    pp.runpp(net_a, init='auto', enforce_q_lims=True)                           # seems that opf does not respect generator voltage schedule... repeat straight power flow
+    ex_pgen = net_a.res_ext_grid.loc[ext_grid_idx, 'p_kw']                      # get external grid real power
+    for idx in swinggen_idxs:                                                   # loop across generators connected to swing bus
+        net_a.gen.loc[idx, 'p_kw'] += ex_pgen / len(swinggen_idxs)              # distribute external gid real power to swing generators dataframe
+        net_a.res_gen.loc[idx, 'p_kw'] += ex_pgen / len(swinggen_idxs)          # distribute external gid real power to swing generators results
+    pp.runpp(net_a, init='auto', enforce_q_lims=True)                           # repeat straight power flow... seems that opf does not respect generator voltage schedule
     print('BASECASE RATEA OPTIMAL POWER FLOW SOLVED ...........................', round(time.time() - solve_starttime, 3))
-    # print_dataframes_results(net_a)
-
-    # -- GET TOTAL BASECASE GENERATION ----------------------------------------
-    ex_pgen = net_a.res_ext_grid.loc[ext_grid_idx, 'p_kw']
-    base_pgens = sum([x for x in net_a.res_gen['p_kw'].values]) + ex_pgen
 
     # -- WRITE BASECASE BUS AND GENERATOR RESULTS TO FILE ---------------------
-    bus_results = copy.deepcopy(net_a.res_bus)
-    gen_results = copy.deepcopy(net_a.res_gen)
-    ext_grid_results = net_a.res_ext_grid
+    ex_pgen = net_a.res_ext_grid.loc[ext_grid_idx, 'p_kw']                      # get external grid real power (should be close to zero)
+    base_pgens = sum([x for x in net_a.res_gen['p_kw'].values])                 # get total basecase real power
+    bus_results = copy.deepcopy(net_a.res_bus)                                  # get basecase bus results
+    gen_results = copy.deepcopy(net_a.res_gen)                                  # get basecase generator results
+    ext_grid_results = copy.deepcopy(net_a.res_ext_grid)                        # get external grid results
+
     write_base_bus_results(outfname1, bus_results, swshidxdict, gen_results, ext_grid_idx)
-    write_base_gen_results(outfname1, gen_results, gids, genbuses, ext_grid_results, ext_grid_idx, swshidxs, swinggen_idxs)
+    write_base_gen_results(outfname1, gen_results, gids, genbuses, swshidxs)
 
     # -- RUN & COPY RATEC BASE CASE NETWORK FOR CONTINGENCY INITIALIZATION ----
     solve_starttime = time.time()
-    pp.runopp(net_c, init='flat', calculate_voltage_angles=True, verbose=False, suppress_warnings=True)
+    pp.runopp(net_c, init='auto')
+    net_c.gen['p_kw'] = net_c.res_gen['p_kw']                                   # copy gens real power to dataframe
+    pp.runpp(net_c, init='auto', enforce_q_lims=True)                           # seems that opf does not respect generator voltage schedule... repeat straight power flow
     net_c.gen['p_kw'] = net_c.res_gen['p_kw']
+    ex_pgen = net_c.res_ext_grid.loc[ext_grid_idx, 'p_kw']                      # get external grid real power
+    ex_qgen = net_c.res_ext_grid.loc[ext_grid_idx, 'q_kvar']                    # get external grid reactive power
+    for idx in swinggen_idxs:                                                   # loop across generators connected to swing bus
+        net_c.gen.loc[idx, 'p_kw'] += ex_pgen / len(swinggen_idxs)              # distribute external gid real power to swing generators dataframe
+        net_c.res_gen.loc[idx, 'p_kw'] += ex_pgen / len(swinggen_idxs)          # distribute external gid real power to swing generators results
+        net_c.res_gen.loc[idx, 'q_kvar'] += ex_qgen / len(swinggen_idxs)        # distribute external gid reactive power to swing generators results
+    pp.runpp(net_c, init='auto', enforce_q_lims=True)                           # repeat straight power flow... seems that opf does not respect generator voltage schedule
     base_net = copy.deepcopy(net_c)
     print('BASECASE RATEC OPTIMAL POWER FLOW SOLVED ...........................', round(time.time() - solve_starttime, 3))
+
+    # TODO DEVELOPMENT CHECK EXTERNAL GRID IS ZERO --------------------
+    # print('BASE EXTERNAL GRID REAL POWER =', net_c.res_ext_grid.loc[ext_grid_idx, 'p_kw'])                      # get external grid real power
+    # print('BASE EXTERNAL GRID REACTIVE POWER =', net_c.res_ext_grid.loc[ext_grid_idx, 'q_kvar'])                      # get external grid real power
+    # print_dataframes_results(net_c)
 
     # =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
     # -- PROCESS STRAIGHT POWER FLOW CONTINGENCIES (FOR PGEN ESTIMATE) --------
     # =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
-    print('====================== CONTINGENCY POWER FLOW ======================')
-    deltap_dict = {}
-    # -- RUN GENERATOR OUTAGES ------------------------------------------------
-    if outagedict['gen']:
-        gstarttime = time.time()
-        for genkey in outagedict['gen']:
-            net = copy.deepcopy(base_net)
-            conlabel = outagedict['gen'][genkey]
-            if genkey in genidxdict:
-                genidx = genidxdict[genkey]
-                pgen_outage = net.res_gen.loc[genidx, 'p_kw']
-                net.gen.in_service[genidx] = False
-            else:
-                print('GENERATOR NOT FOUND ................................................', conlabel)
-                continue
-            pp.runpp(net, init='auto', max_iteration=ITMXN, calculate_voltage_angles=True, enforce_q_lims=True)
-
-            # -- CALCULATE CHANGE IN GENERATION COMPARED TO BASECASE  -------------
-            ex_pgen = net.res_ext_grid.loc[ext_grid_idx, 'p_kw']
-            con_pgens = sum([x for x in net.res_gen['p_kw'].values]) + ex_pgen
-            deltap_dict.update({genkey: con_pgens - base_pgens + pgen_outage})
-
-            # -- TODO not needed in production
-            # bus_results = copy.deepcopy(net.res_bus)
-            # gen_results = copy.deepcopy(net.res_gen)
-            # ext_grid_results = net.res_ext_grid
-            # # -- WRITE CONTINGENCY BUS AND GENERATOR RESULTS TO FILE --------------
-            # conlabel = "'" + outagedict['gen'][genkey] + "'"
-            # write_bus_results('straight_solution2', bus_results, swshidxdict, gen_results, conlabel, ext_grid_idx)
-            # write_gen_results('straight_solution2', gen_results, gids, genbuses, base_pgens, ext_grid_results, ext_grid_idx, swshidxs, swinggen_idxs, pgen_outage)
-        print('GENERATOR OUTAGES SOLVED ...........................................', round(time.time() - gstarttime, 3))
-
-    # -- RUN LINE AND TRANSFORMER OUTAGES -------------------------------------
-    if outagedict['branch']:
-        lxstarttime = time.time()
-        for branchkey in outagedict['branch']:
-            net = copy.deepcopy(base_net)
-            conlabel = outagedict['branch'][branchkey]
-            if branchkey in linedict:
-                lineidx = linedict[branchkey]
-                net.line.in_service[lineidx] = False
-            elif branchkey in xfmrdict:
-                xfmridx = xfmrdict[branchkey]
-                net.trafo.in_service[xfmridx] = False
-            else:
-                print('LINE OR TRANSFORMER NOT FOUND ......................................', branchkey)
-                continue
-            pp.runpp(net, init='auto', max_iteration=ITMXN, calculate_voltage_angles=True)
-
-            # -- CALCULATE CHANGE IN GENERATION COMPARED TO BASECASE  -------------
-            ex_pgen = net.res_ext_grid.loc[ext_grid_idx, 'p_kw']
-            con_pgens = sum([x for x in net.res_gen['p_kw'].values]) + ex_pgen
-            deltap_dict.update({branchkey: con_pgens - base_pgens})
-
-            # -- TODO not needed in production
-            # bus_results = copy.deepcopy(net.res_bus)
-            # gen_results = copy.deepcopy(net.res_gen)
-            # ext_grid_results = net.res_ext_grid
-            # # -- WRITE CONTINGENCY BUS AND GENERATOR RESULTS TO FILE ----------
-            # conlabel = "'" + outagedict['branch'][branchkey] + "'"
-            # write_bus_results('straight_solution2', bus_results, swshidxdict, gen_results, conlabel, ext_grid_idx)
-            # write_gen_results('straight_solution2', gen_results, gids, genbuses, base_pgens, ext_grid_results, ext_grid_idx, swshidxs, swinggen_idxs, 0.0)
-        print('LINE AND TRANSFORMER OUTAGES SOLVED ................................', round(time.time() - lxstarttime, 3))
+    # -- TODO not needed in production ----------------------------------------
+    # deltap_dict = {}
+    # print('====================== CONTINGENCY POWER FLOW ======================')
+    # # -- RUN GENERATOR OUTAGES ------------------------------------------------
+    # if outagedict['gen']:
+    #     gstarttime = time.time()
+    #     for genkey in outagedict['gen']:
+    #         net = copy.deepcopy(base_net)
+    #         conlabel = outagedict['gen'][genkey]
+    #         if genkey in genidxdict:
+    #             genidx = genidxdict[genkey]
+    #             pgen_outage = net.res_gen.loc[genidx, 'p_kw']
+    #             net.gen.in_service[genidx] = False
+    #         else:
+    #             print('GENERATOR NOT FOUND ................................................', conlabel)
+    #             continue
+    #
+    #         # -- RUN STRAIGHT POWERFLOW OUTAGE --------------------------------
+    #         pp.runpp(net, init='auto')
+    #
+    #         # -- CALCULATE CHANGE IN GENERATION COMPARED TO BASECASE  ---------
+    #         ex_pgen = net.res_ext_grid.loc[ext_grid_idx, 'p_kw']
+    #         con_pgens = sum([x for x in net.res_gen['p_kw'].values])
+    #         # con_pgens = sum([x for x in net.res_gen['p_kw'].values]) + ex_pgen
+    #         deltap_dict.update({genkey: (con_pgens - base_pgens + pgen_outage) / mva_base})
+    #
+    #         # -- TODO not needed in production ----------------------------------------------------
+    #         try:
+    #             os.remove('E:\GO_Challenge\straight_solution2.txt')
+    #         except FileNotFoundError:
+    #             pass
+    #         print('------------------------------------------------------------------------------------------ GEN DELTAP ESTIMATE =', round(con_pgens - base_pgens, 3), 'kW')
+    #
+    #         bus_results = copy.deepcopy(net.res_bus)
+    #         gen_results = copy.deepcopy(net.res_gen)
+    #         ext_grid_results = net.res_ext_grid
+    #         # -- WRITE CONTINGENCY BUS AND GENERATOR RESULTS TO FILE ----------
+    #         conlabel = "'" + outagedict['gen'][genkey] + "'"
+    #         write_bus_results('straight_solution2', bus_results, swshidxdict, gen_results, ext_grid_idx, conlabel)
+    #         write_gen_results('straight_solution2', gen_results, gids, genbuses, base_pgens, ext_grid_results, ext_grid_idx, swshidxs, swinggen_idxs, pgen_outage)
+    #         # -- TODO END -------------------------------------------------------------------------
+    #     print('GENERATOR OUTAGES SOLVED ...........................................', round(time.time() - gstarttime, 3))
+    #
+    # # -- RUN LINE AND TRANSFORMER OUTAGES -------------------------------------
+    # if outagedict['branch']:
+    #     lxstarttime = time.time()
+    #     for branchkey in outagedict['branch']:
+    #         net = copy.deepcopy(base_net)
+    #         conlabel = outagedict['branch'][branchkey]
+    #         if branchkey in linedict:
+    #             lineidx = linedict[branchkey]
+    #             net.line.in_service[lineidx] = False
+    #         elif branchkey in xfmrdict:
+    #             xfmridx = xfmrdict[branchkey]
+    #             net.trafo.in_service[xfmridx] = False
+    #         else:
+    #             print('LINE OR TRANSFORMER NOT FOUND ......................................', branchkey)
+    #             continue
+    #
+    #         # -- RUN STRAIGHT POWERFLOW OUTAGE --------------------------------
+    #         pp.runpp(net, init='auto')
+    #
+    #         # -- CALCULATE CHANGE IN GENERATION COMPARED TO BASECASE  ---------
+    #         ex_pgen = net.res_ext_grid.loc[ext_grid_idx, 'p_kw']
+    #         con_pgens = sum([x for x in net.res_gen['p_kw'].values])
+    #         # con_pgens = sum([x for x in net.res_gen['p_kw'].values]) + ex_pgen
+    #         deltap_dict.update({branchkey: (con_pgens - base_pgens) / mva_base})
+    #
+    #         # -- TODO not needed in production ----------------------------------------------------
+    #         try:
+    #             os.remove('E:\GO_Challenge\straight_solution2.txt')
+    #         except FileNotFoundError:
+    #             pass
+    #         bus_results = copy.deepcopy(net.res_bus)
+    #         gen_results = copy.deepcopy(net.res_gen)
+    #         ext_grid_results = net.res_ext_grid
+    #         # -- WRITE CONTINGENCY BUS AND GENERATOR RESULTS TO FILE ----------
+    #         conlabel = "'" + outagedict['branch'][branchkey] + "'"
+    #         write_bus_results('straight_solution2.txt', bus_results, swshidxdict, gen_results, ext_grid_idx, conlabel)
+    #         write_gen_results('straight_solution2.txt', gen_results, gids, genbuses, base_pgens, ext_grid_results, ext_grid_idx, swshidxs, swinggen_idxs, 0.0)
+    #         # -- TODO END -------------------------------------------------------------------------
+    #     print('LINE AND TRANSFORMER OUTAGES SOLVED ................................', round(time.time() - lxstarttime, 3))
 
     # =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
     # -- PROCESS OPF CONTINGENCIES --------------------------------------------
@@ -1235,43 +1260,44 @@ if __name__ == "__main__":
                 continue
 
             # -- SET GENERATOR LIMITS ACCORDING TO PFACTOR --------------------
-            deltap_estimate = deltap_dict[genkey]
-
             for gen_pkey in participation_dict:
                 gidx = genidxdict[gen_pkey]
                 pfactor = participation_dict[gen_pkey]
                 pgen = net.res_gen.loc[gidx, 'p_kw']
                 pmin = net.gen.loc[gidx, 'min_p_kw']
                 pmax = net.gen.loc[gidx, 'max_p_kw']
-                p_limit = pgen + pfactor * deltap_estimate
+                # p_limit = pgen + pfactor * gscale
+                #
+                # if gscale < 0.0:
+                #     if p_limit < pmin:
+                #         net.gen.loc[gidx, 'min_p_kw'] = max(pmin, p_limit)
+                #
+                #     #     print('PARTICIPATING GENERATOR =', gen_pkey, 'PGEN =', pgen)
+                #     #     print('PFACTOR =', pfactor, 'DELTAP ESTIMATE =', gscale)
+                #     #     print('REQUESTED PMIN =',  p_limit)
+                #     #     print('PMIN =', pmin)
+                #     #     print('PMAX =', pmax)
+                #     #     print('PMIN_LIMIT =', max(pmin, p_limit))
+                #
+                # elif gscale > 0.0:
+                #     if p_limit > pmax:
+                #         net.gen.loc[gidx, 'max_p_kw'] = min(pmax, p_limit)
+                #
+                #     #     print('OUTAGE = ', genkey)
+                #     #     print('PARTICIPATING GENERATOR =', gen_pkey, 'PGEN =', pgen)
+                #     #     print('PFACTOR =', pfactor, 'DELTAP ESTIMATE =', gscale)
+                #     #     print('REQUESTED PMAX =', p_limit)
+                #     #     print('PMIN =',  pmin)
+                #     #     print('PMAX =',  pmax)
+                #     #     print('PMAX_LIMIT =', min(pmax, p_limit))
 
-                if deltap_estimate > 0.0:
-                    net.gen.loc[gidx, 'max_p_kw'] = min(pmax, p_limit)
-                    # if p_limit > pmax:
-                    #     print('OUTAGE = ', genkey)
-                    #     print('PARTICIPATING GENERATOR =', gen_pkey, 'PGEN =', pgen)
-                    #     print('PFACTOR =', pfactor, 'DELTAP ESTIMATE =', deltap_estimate)
-                    #     print('REQUESTED PMAX =', p_limit)
-                    #     print('PMIN =',  pmin)
-                    #     print('PMAX =',  pmax)
-                    #     print('PMAX_LIMIT =', min(pmax, p_limit))
-
-                elif deltap_estimate < 0.0:
-                    net.gen.loc[gidx, 'min_p_kw'] = max(pmin, p_limit)
-                    # if p_limit < pmin:
-                    #     print('PARTICIPATING GENERATOR =', gen_pkey, 'PGEN =', pgen)
-                    #     print('PFACTOR =', pfactor, 'DELTAP ESTIMATE =', deltap_estimate)
-                    #     print('REQUESTED PMIN =',  p_limit)
-                    #     print('PMIN =', pmin)
-                    #     print('PMAX =', pmax)
-                    #     print('PMIN_LIMIT =', max(pmin, p_limit))
-
-            pp.runopp(net, init='flat', calculate_voltage_angles=True, verbose=False, suppress_warnings=True)
+            pp.runopp(net, init='flat', calculate_voltage_angles=True, verbose=False, suppress_warnings=False)
 
             # -- WRITE CONTINGENCY BUS AND GENERATOR RESULTS TO FILE ----------
             bus_results = copy.deepcopy(net.res_bus)
             gen_results = copy.deepcopy(net.res_gen)
             ext_grid_results = net.res_ext_grid
+
             # -- WRITE CONTINGENCY BUS AND GENERATOR RESULTS TO FILE --------------
             conlabel = "'" + outagedict['gen'][genkey] + "'"
             write_bus_results(outfname2, bus_results, swshidxdict, gen_results, conlabel, ext_grid_idx)
@@ -1294,49 +1320,97 @@ if __name__ == "__main__":
                 print('LINE OR TRANSFORMER NOT FOUND ......................................', conlabel)
                 continue
 
-            # -- TODO limit pmax and pmin according to pfactor here then run
-            # for gen_pkey in participation_dict:
-            #     gidx = genidxdict[gen_pkey]
-            #     pfactor = participation_dict[gen_pkey]
-            #     pgen = net.res_gen.loc[gidx, 'p_kw']
-            #     pmin = net.gen.loc[gidx, 'min_p_kw']
-            #     pmax = net.gen.loc[gidx, 'max_p_kw']
-            #     p_limit = pgen + pfactor * deltap_estimate
-            #
-            #     if deltap_estimate > 0.0:
-            #         net.gen.loc[gidx, 'max_p_kw'] = min(pmax, p_limit)
-            #         # if p_limit > pmax:
-            #         #     print('OUTAGE = ', genkey)
-            #         #     print('PARTICIPATING GENERATOR =', gen_pkey, 'PGEN =', pgen)
-            #         #     print('PFACTOR =', pfactor, 'DELTAP ESTIMATE =', deltap_estimate)
-            #         #     print('REQUESTED PMAX =', p_limit)
-            #         #     print('PMIN =',  pmin)
-            #         #     print('PMAX =',  pmax)
-            #         #     print('PMAX_LIMIT =', min(pmax, p_limit))
-            #
-            #     elif deltap_estimate < 0.0:
-            #         net.gen.loc[gidx, 'min_p_kw'] = max(pmin, p_limit)
-            #         # if p_limit < pmin:
-            #         #     print('PARTICIPATING GENERATOR =', gen_pkey, 'PGEN =', pgen)
-            #         #     print('PFACTOR =', pfactor, 'DELTAP ESTIMATE =', deltap_estimate)
-            #         #     print('REQUESTED PMIN =',  p_limit)
-            #         #     print('PMIN =', pmin)
-            #         #     print('PMAX =', pmax)
-            #         #     print('PMIN_LIMIT =', max(pmin, p_limit))
+            # -- RUN THE OUTAGE AND MOVE EXT GRID POWER TO SWING GENS ---------
+            pp.runopp(net, init='pf')                                           # solve this opf outage
+            net.gen['p_kw'] = net.res_gen['p_kw']                               # copy opf PGEN to network real power setpoint
+            pp.runpp(net, init='results')                                       # seems that opf does not respect generator voltage schedule... repeat straight power flow
+            net.gen['p_kw'] = net.res_gen['p_kw']
+            ex_pgen = net.res_ext_grid.loc[ext_grid_idx, 'p_kw']
+            ex_qgen = net.res_ext_grid.loc[ext_grid_idx, 'q_kvar']
+            for idx in swinggen_idxs:
+                net.gen.loc[idx, 'p_kw'] += ex_pgen / len(swinggen_idxs)
+                net.res_gen.loc[idx, 'p_kw'] += ex_pgen / len(swinggen_idxs)
+                net.res_gen.loc[idx, 'q_kvar'] += ex_qgen / len(swinggen_idxs)
+            pp.runpp(net, init='results')                                       # seems that opf does not respect generator voltage schedule... repeat straight power flow
 
-            pp.runopp(net, init='flat', calculate_voltage_angles=True, verbose=False, suppress_warnings=True)
+            # -- CALCULATE CHANGE IN GENERATION COMPARED TO BASECASE  ---------
+            con_pgens = sum([x for x in net.res_gen['p_kw'].values])
+            deltap = (con_pgens - base_pgens) / mva_base
+
+            # TODO DEVELOPMENT CHECK EXTERNAL GRID IS ZERO --------------------
+            # ex_pgen = net.res_ext_grid.loc[ext_grid_idx, 'p_kw']
+            # ex_qgen = net.res_ext_grid.loc[ext_grid_idx, 'q_kvar']
+            # print('EXTERNAL PGEN QGEN =', ex_pgen, ex_qgen)
+
+            # -- SET GENERATOR LIMITS ACCORDING TO PFACTOR --------------------
+            for i in range(3):
+                net.gen['min_p_kw'] = base_net.gen['min_p_kw']
+                net.gen['max_p_kw'] = base_net.gen['max_p_kw']
+                for gen_pkey in participation_dict:
+                    gidx = genidxdict[gen_pkey]
+                    pfactor = participation_dict[gen_pkey]
+                    pmin = net.gen.loc[gidx, 'min_p_kw']
+                    pmax = net.gen.loc[gidx, 'max_p_kw']
+                    base_pgen = net_a.res_gen.loc[gidx, 'p_kw']
+
+                    p_dp = base_pgen + pfactor * deltap
+
+                    if deltap < 0.0:
+                        net.gen.loc[gidx, 'p_kw'] = p_dp
+                        if p_dp < pmin:
+                            net.gen.loc[gidx, 'p_kw'] = pmin
+                            net.gen.loc[gidx, 'min_p_kw'] = pmin
+                            # print()
+                            # print('PARTICIPATING GENERATOR =', gen_pkey, 'PGEN =', base_pgen)
+                            # print('PFACTOR =', pfactor, 'DELTAP ESTIMATE =', deltap)
+                            # print('REQUESTED PMIN =',  p_dp)
+                            # print('EXISTING PMIN =', pmin)
+                            # print('EXISTING PMAX =', pmax)
+                            # print('NEW PMIN =', net.gen.loc[gidx, 'min_p_kw'], p_dp - pmin)
+
+                    elif deltap > 0.0:
+                        # print('UNUSAL THAT GENERATION WOULD DECREASE WITHOUT LOAD LOSS')
+                        net.gen.loc[gidx, 'p_kw'] = p_dp
+                        if p_dp > pmax:
+                            net.gen.loc[gidx, 'p_kw'] = pmax
+                            net.gen.loc[gidx, 'max_p_kw'] = pmax
+                            # print()
+                            # print('OUTAGE = ', branchkey)
+                            # print('PARTICIPATING GENERATOR =', gen_pkey, 'PGEN =', base_pgen)
+                            # print('PFACTOR =', pfactor, 'DELTAP ESTIMATE =', deltap)
+                            # print('REQUESTED PMAX =', p_dp)
+                            # print('EXISTING PMIN =',  pmin)
+                            # print('EXISTING PMAX =',  pmax)
+                            # print('NEW PMAX =', net.gen.loc[gidx, 'max_p_kw'])
+
+                # -- RUN THE OUTAGE AND MOVE EXT GRID POWER TO SWING GENS -----
+                pp.runpp(net, init='results')                                       # seems that opf does not respect generator voltage schedule... repeat straight power flow
+                net.gen['p_kw'] = net.res_gen['p_kw']                               # copy gens real power to dataframe setpoint
+                ex_pgen = net.res_ext_grid.loc[ext_grid_idx, 'p_kw']                # get external grid# loop across generators connected to swing bus real power
+                ex_qgen = net.res_ext_grid.loc[ext_grid_idx, 'q_kvar']              # get external grid reactive power
+                for idx in swinggen_idxs:                                           # loop across swing generators
+                    net.gen.loc[idx, 'p_kw'] += ex_pgen / len(swinggen_idxs)        # distribute external gid real power to swing generators dataframe
+                    net.res_gen.loc[idx, 'p_kw'] += ex_pgen / len(swinggen_idxs)    # distribute external gid real power to swing generators results
+                    net.res_gen.loc[idx, 'q_kvar'] += ex_qgen / len(swinggen_idxs)  # distribute external gid reactive power to swing generators results
+
+                # -- CALCULATE CHANGE IN GENERATION COMPARED TO BASECASE  -----
+                con_pgens = sum([x for x in net.res_gen['p_kw'].values])
+                deltap = (con_pgens - base_pgens) / mva_base
+
+            # -- RUN POWER FLOW ONE LAST TIME  --------------------------------
+            pp.runpp(net, init='auto')
+            print('EXTERNAL PGEN QGEN =', net.res_ext_grid.loc[ext_grid_idx, 'p_kw'])
 
             # -- WRITE CONTINGENCY BUS AND GENERATOR RESULTS TO FILE ----------
-            bus_results = copy.deepcopy(net.res_bus)
-            gen_results = copy.deepcopy(net.res_gen)
-            ext_grid_results = net.res_ext_grid
-            # -- WRITE CONTINGENCY BUS AND GENERATOR RESULTS TO FILE ----------
+            bus_results = copy.deepcopy(net.res_bus)                            # get contingency bus results
+            gen_results = copy.deepcopy(net.res_gen)                            # get contingency generator results
             conlabel = "'" + outagedict['branch'][branchkey] + "'"
-            write_bus_results(outfname2, bus_results, swshidxdict, gen_results, conlabel, ext_grid_idx)
-            write_gen_results(outfname2, gen_results, gids, genbuses, base_pgens, ext_grid_results, ext_grid_idx, swshidxs, swinggen_idxs, 0.0)
+            write_bus_results(outfname2, bus_results, swshidxdict, gen_results, ext_grid_idx, conlabel)
+            write_gen_results(outfname2, gen_results, gids, genbuses, deltap, swshidxs, 0.0)
         print('OPF LINE AND TRANSFORMER OUTAGES SOLVED ............................', round(time.time() - opflxstarttime, 3))
 
-    # print('DONE WITH OPF CONTINGENCIES ........................................', round(time.time() - opf_starttime, 3))
     print('=========================== DONE ===================================')
     print()
     print('TOTAL TIME -------------------------------------------------------->', round(time.time() - start_time, 3))
+
+    print_dataframes_results(net)
