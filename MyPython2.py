@@ -131,7 +131,7 @@ def write_gen_results(fname, g_results, genids, gbuses, delta, ssh_idxs):
     return
 
 
-def run_gen_outage_get_delta(genkey, c_net, a_net, outage_dict, pfactor_dict, gendict, swshidx_dict):
+def run_gen_outage_get_delta(genkey, c_net, a_net, outage_dict, pfactor_dict, gendict, genidx_dict, swshidx_dict):
     """ run outaged generators and calculate delta variable """
     gnet = copy.deepcopy(c_net)                                                                     # get fresh copy of ratec network
     anet = copy.deepcopy(a_net)                                                                     # get fresh copy of ratec network
@@ -166,6 +166,12 @@ def run_gen_outage_get_delta(genkey, c_net, a_net, outage_dict, pfactor_dict, ge
     pp.runpp(gnet, enforce_q_lims=True)                                                             # run straight power flow
     ex_pgen = gnet.res_ext_grid.loc[ext_grid_idx, 'p_kw']                                           # get external grid power
     delta_init = (pgen_outage_ + ex_pgen) / pfactor_total                                          # first estimate of delta variable
+
+    for genbus in genidx_dict:                                                                      # loop across generator buses
+        gidx = genidx_dict[genbus]                                                                  # get generator index
+        if not gnet.gen.loc[gidx, 'in_service']:                                                     # check if in-service
+            continue
+        gnet.gen.loc[gidx, 'controllable'] = False                                                   # turn off generator opf control
 
     pp.runopp(gnet, enforce_q_lims=True)                                                            # run optimal power flow (optimize swshunts)
     swsh_q_mins = gnet.gen.loc[swshidxs, 'min_q_kvar']                                              # get copy of swshunt qmins
@@ -406,7 +412,7 @@ def run_robust_branch_outage_get_delta(branchkey, c_net, a_net, line_dict, xfmr_
                 solved = True                                                                       # set solved flag
                 bus_results = net.res_bus
                 gen_results = net.res_gen
-                best_delta = delta
+                best_delta = 0.0
                 best_ex_pgen = ex_pgen
                 best_ex_qgen = ex_qgen
                 best_step = step
@@ -549,7 +555,7 @@ if __name__ == "__main__":
         if Genkey not in Gen_dict:                                                                   # CHECK IF GENERATOR EXISTS
             print('GENERATOR NOT FOUND ................................................', Genkey)   # PRINT MESSAGE
             continue
-        Conlabel, bus_results, gen_results, Delta = run_gen_outage_get_delta(Genkey, net_c, net_a, Outage_dict, Pfactor_dict, Gen_dict, SwShidx_dict)
+        Conlabel, bus_results, gen_results, Delta = run_gen_outage_get_delta(Genkey, net_c, net_a, Outage_dict, Pfactor_dict, Gen_dict, Genidxdict, SwShidx_dict)
         # -- WRITE CONTINGENCY BUS AND GENERATOR RESULTS TO FILE -----------------------------------
         Conlabel = "'" + Conlabel + "'"                                                             # FORMAT CONLABEL FOR OUTPUT
         write_bus_results(outfname2, bus_results, SwShidx_dict, gen_results, ext_grid_idx, Conlabel)

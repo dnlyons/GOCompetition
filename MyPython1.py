@@ -781,9 +781,13 @@ if __name__ == "__main__":
     scopf_starttime = time.time()
     print('------------- ATTEMPTING TO INITIALIZE BASECASE SCOPF --------------')
     net = copy.deepcopy(net_a)                                                                      # GET FRESH COPY OF BASECASE NETWORK
-    lidx = linedict['87-141-1']                                   # HARDCODED CONTINGENCY
-    net.line.loc[lidx, 'in_service'] = False                                                        # SWITCH OUT OF SERVICE
-
+    
+##    try:
+##        lidx = linedict['87-141-1']                                   # HARDCODED CONTINGENCY
+##        net.line.loc[lidx, 'in_service'] = False                                                        # SWITCH OUT OF SERVICE
+##    except:
+##        pass
+    
     pp.runopp(net, enforce_q_lims=True)                                                             # RUN OPF ON THIS NETWORK
     pp.runopp(net_a, enforce_q_lims=True)                                                           # RUN OPF ON BASECASE NETWORK
     pp.runopp(net_c, enforce_q_lims=True)                                                           # RUN OPF ON CONTINGENCY NETWORK
