@@ -12,7 +12,7 @@ from pandas import options as pdoptions
 from pathlib import Path
 
 cwd = os.path.dirname(__file__)
-print(os.path.abspath('../..'))
+
 # -- DEVELOPMENT DEFAULT ------------------------------------------------------
 if not sys.argv[1:]:
     con_fname = cwd + r'/sandbox/Network_01-10O/scenario_1/case.con'
@@ -4608,7 +4608,7 @@ if __name__ == "__main__":
     # =============================================================================================
     # -- WRITE DATA TO FILE -----------------------------------------------------------------------
     # =============================================================================================
-    print('====================================================================')
+    print('WRITING FILES ======================================================', os.path.abspath('..'))
     write_starttime = time.time()
     print(os.path.dirname(__file__))
     if not sys.argv[1:]:
@@ -4616,9 +4616,9 @@ if __name__ == "__main__":
         netc_fname = cwd + r'/netc.p'
         data_fname = cwd + r'/netdata.pkl'
     else:
-        neta_fname = cwd + r'/neta.p'
-        netc_fname = cwd + r'/netc.p'
-        data_fname = cwd + r'/netdata.pkl'
+        neta_fname = os.path.abspath('..') + r'/neta.p'
+        netc_fname = os.path.abspath('..') + r'/netc.p'
+        data_fname = os.path.abspath('..') + r'/netdata.pkl'
 
         
     # -- WRITE RATEA NETWORK TO FILE --------------------------------------------------------------
