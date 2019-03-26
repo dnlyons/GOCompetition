@@ -1,0 +1,13 @@
+
+
+------------------------- READING RAW DATA -------------------------
+READING RAW FILE ................................................... case.raw
+READING ROP FILE ................................................... case.rop
+READING INL FILE ................................................... case.inl
+READING CON FILE.................................................... case.con
+Traceback (most recent call last):
+  File "MyPython1.py", line 442, in <module>
+    swingbus, swing_kv, swing_angle, swing_vlow, swing_vhigh = get_swingbus_data(raw_data.raw.buses)
+  File "MyPython1.py", line 79, in get_swingbus_data
+    if bus.ide == 3:
+AttributeError: 'Bus' object has no attribute 'ide'
