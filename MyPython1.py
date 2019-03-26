@@ -9,9 +9,10 @@ import numpy
 import pandapower as pp
 from pandas import options as pdoptions
 #import data as data_read
+from pathlib import Path
 
 cwd = os.path.dirname(__file__)
-
+print(os.path.abspath('../..'))
 # -- DEVELOPMENT DEFAULT ------------------------------------------------------
 if not sys.argv[1:]:
     con_fname = cwd + r'/sandbox/Network_01-10O/scenario_1/case.con'
@@ -20,6 +21,11 @@ if not sys.argv[1:]:
     rop_fname = cwd + r'/sandbox/Network_01-10O/case.rop'
     outfname1 = cwd + r'/sandbox/Network_01-10O/scenario_1/solution1.txt'
     outfname2 = cwd + r'/sandbox/Network_01-10O/scenario_1/solution2.txt'
+    try:
+        os.remove(outfname1)
+    except FileNotFoundError:
+        pass
+    
 
 # -- USING COMMAND LINE -------------------------------------------------------
 if sys.argv[1:]:
@@ -31,10 +37,7 @@ if sys.argv[1:]:
     outfname1 = 'solution1.txt'
     outfname2 = 'solution2.txt'
 
-try:
-    os.remove(outfname1)
-except FileNotFoundError:
-    pass
+
 
 GVREG = 0                   # GENERATORS VOLTAGE SCHEDULES ........  0=DEFAULT_GENV_RAW, 1=CUSTOM(ALL)
 SWSHVREG = 1                # SWITCHED SHUNTS VOLTAGE SCHEDULES ...  0=DEFAULT_BUSV_RAW, 1=CUSTOM(ALL)
@@ -4607,10 +4610,17 @@ if __name__ == "__main__":
     # =============================================================================================
     print('====================================================================')
     write_starttime = time.time()
-    neta_fname = cwd + r'/sandbox/Network_01-10O/scenario_1/neta.p'
-    netc_fname = cwd + r'/sandbox/Network_01-10O/scenario_1/netc.p'
-    data_fname = cwd + r'/sandbox/Network_01-10O/scenario_1/netdata.pkl'
-    margin_fname = cwd + r'/sandbox/Network_01-10O/scenario_1/margins.pkl'
+    print(os.path.dirname(__file__))
+    if not sys.argv[1:]:
+        neta_fname = cwd + r'/neta.p'
+        netc_fname = cwd + r'/netc.p'
+        data_fname = cwd + r'/netdata.pkl'
+    else:
+        neta_fname = cwd + r'/neta.p'
+        netc_fname = cwd + r'/netc.p'
+        data_fname = cwd + r'/netdata.pkl'
+
+        
     # -- WRITE RATEA NETWORK TO FILE --------------------------------------------------------------
     pp.to_pickle(net_a, neta_fname)
     # -- WRITE RATEC NETWORK TO FILE --------------------------------------------------------------

@@ -29,11 +29,10 @@ if sys.argv[1:]:
     outfname1 = 'solution1.txt'
     outfname2 = 'solution2.txt'
 
-try:
-    os.remove(outfname2)
-except FileNotFoundError:
-    pass
-
+# -- USING COMMAND LINE -------------------------------------------------------
+if sys.argv[1:]:
+    print()
+    outfname2 = 'solution2.txt'
 
 # =============================================================================
 # -- FUNCTIONS ----------------------------------------------------------------
@@ -522,10 +521,14 @@ if __name__ == "__main__":
     # =============================================================================================
     # -- GET DATA FROM FILES ----------------------------------------------------------------------
     # =============================================================================================
-    neta_fname = cwd + r'/sandbox/Network_01-10O/scenario_1/neta.p'
-    netc_fname = cwd + r'/sandbox/Network_01-10O/scenario_1/netc.p'
-    data_fname = cwd + r'/sandbox/Network_01-10O/scenario_1/netdata.pkl'
-    margin_fname = cwd + r'/sandbox/Network_01-10O/scenario_1/margins.pkl'
+    if not sys.argv[1:]:
+        neta_fname = cwd + r'/neta.p'
+        netc_fname = cwd + r'/netc.p'
+        data_fname = cwd + r'/netdata.pkl'
+    else:
+        neta_fname = os.path.abspath('..') + r'/neta.p'
+        netc_fname = os.path.abspath('..') + r'/netc.p'
+        data_fname = os.path.abspath('..') + r'/netdata.pkl'
 
     print('---------------------- GETTING DATA FROM FILE ----------------------')
     try:
