@@ -641,7 +641,10 @@ if __name__ == "__main__":
     swshidxs = []
     swsh_dict = {}
     swshbus_dict = {}
-    area_swhunts = {area: [] for area in areas}
+    area_swhunts = {}
+    for area in areas:
+        area_swhunts.update({area: []})
+
     if raw_data.raw.switched_shunts.values():
         print('ADD SWITCHED SHUNTS ................................................')
         for swshunt in raw_data.raw.switched_shunts.values():
