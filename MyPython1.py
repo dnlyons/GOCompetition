@@ -508,7 +508,10 @@ if __name__ == "__main__":
     genidxs = []
     genbus_dict = {}
     participating_gens = []
-    area_participating_gens = {area: [] for area in areas}
+    area_participating_gens = {}
+    for area in areas:
+        area_participating_gens.update({area: []})
+        
     # -- ADD SWING GENERATORS ---------------------------------------------------------------------
     #  swgens_data = (key, id, pgen, qgen, qmax, qmin, vreg, pmax, pmin, status)
     for swgen_data in swgens_data:
