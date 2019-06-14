@@ -199,7 +199,7 @@ def run_gen_outages(genkey, c_net, a_net, base_pgens, outage_dict, area_particip
     ex_pgen = net.res_ext_grid.loc[ext_grid_idx, 'p_mw']                                            # get external grid real power
     ex_qgen = net.res_ext_grid.loc[ext_grid_idx, 'q_mvar']                                          # get external grid reactive power
     print('GEN {0:6s} . . . . . . . . . . . . . . . . . . . . . . . . . . . . .'.format(genkey),
-          '\u0394 =', round(delta, 6), '(' + str(step) + ')', round(ex_pgen, 6), round(ex_qgen, 6), round(max_loading, 1))
+          '\u0394'.encode('utf-8') + ' =', round(delta, 6), '(' + str(step) + ')', round(ex_pgen, 6), round(ex_qgen, 6), round(max_loading, 1))
 
     if step == 120:
         time.sleep(1)
@@ -307,7 +307,7 @@ def run_branch_outages(branchkey, c_net, a_net, base_pgens, line_dict, xfmr_dict
     ex_pgen = net.res_ext_grid.loc[ext_grid_idx, 'p_mw']                                            # get external grid real power
     ex_qgen = net.res_ext_grid.loc[ext_grid_idx, 'q_mvar']                                          # get external grid reactive power
     print('{0:4s} {1:11s} . . . . . . . . . . . . . . . . . . . . . . . . . .'.format(btext, branchkey),
-          '\u0394 =', round(delta, 6), '(' + str(step) + ')', round(ex_pgen, 6), round(ex_qgen, 6), round(max_loading, 1))
+          '\u0394'.encode('utf-8') + ' =', round(delta, 6), '(' + str(step) + ')', round(ex_pgen, 6), round(ex_qgen, 6), round(max_loading, 1))
 
     if step == 120:
         for gkey in participating_units:
