@@ -322,7 +322,7 @@ def arghelper1(args):
 
 
 def parallel_run_gen_outages(gen_arglist):
-    pool = multiprocessing.Pool(processes=int(os.environ['NUMBER_OF_PROCESSORS']))
+    pool = multiprocessing.Pool(processes=os.cpu_count())
     g_results = pool.map_async(arghelper1, gen_arglist)
     pool.close()
     pool.join()
@@ -334,7 +334,7 @@ def arghelper2(args):
 
 
 def parallel_run_branch_outages(branch_arglist):
-    pool = multiprocessing.Pool(processes=int(os.environ['NUMBER_OF_PROCESSORS']))
+    pool = multiprocessing.Pool(processes=os.cpu_count())
     b_results = pool.map_async(arghelper2, branch_arglist)
     pool.close()
     pool.join()
