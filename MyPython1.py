@@ -26,27 +26,25 @@ if sys.argv[1:]:
     # neta_fname = os.path.join('submission', 'neta.p')
     # netc_fname = os.path.join('submission', 'netc.p')
     # data_fname = os.path.join('submission', 'netdata.pkl')
-    neta_fname = os.path.abspath('..') + r'/neta.p'
-    netc_fname = os.path.abspath('..') + r'/netc.p'
-    data_fname = os.path.abspath('..') + r'/netdata.pkl'
+    # neta_fname = os.path.abspath('..') + r'/neta.p'
+    # netc_fname = os.path.abspath('..') + r'/netc.p'
+    # data_fname = os.path.abspath('..') + r'/netdata.pkl'
 
 # -----------------------------------------------------------------------------
 # -- DEVELOPMENT --- DEVELOPMENT --- DEVELOPMENT --- DEVELOPMENT --------------
 # -----------------------------------------------------------------------------
 if not sys.argv[1:]:
-    con_fname = cwd + r'/sandbox/Network_01R-10/scenario_1/case.con'
-    inl_fname = cwd + r'/sandbox/Network_01R-10/case.inl'
-    raw_fname = cwd + r'/sandbox/Network_01R-10/scenario_1/case.raw'
-    rop_fname = cwd + r'/sandbox/Network_01R-10/case.rop'
-    outfname1 = cwd + r'/sandbox/Network_01R-10/scenario_1/solution1.txt'
-    outfname2 = cwd + r'/sandbox/Network_01R-10/scenario_1/solution2.txt'
-    neta_fname = cwd + r'/sandbox/Network_01R-10/scenario_1/neta.p'
-    netc_fname = cwd + r'/sandbox/Network_01R-10/scenario_1/netc.p'
-    data_fname = cwd + r'/sandbox/Network_01R-10/scenario_1/netdata.pkl'
+    con_fname = cwd + r'/Network_01R-10/scenario_1/case.con'
+    inl_fname = cwd + r'/Network_01R-10/case.inl'
+    raw_fname = cwd + r'/Network_01R-10/scenario_1/case.raw'
+    rop_fname = cwd + r'/Network_01R-10/case.rop'
+    outfname1 = cwd + r'/solution1.txt'
+    # neta_fname = cwd + r'/Network_01R-10/scenario_1/neta.p'
+    # netc_fname = cwd + r'/Network_01R-10/scenario_1/netc.p'
+    # data_fname = cwd + r'/Network_01R-10/scenario_1/netdata.pkl'
 
     try:
         os.remove(outfname1)
-        os.remove(outfname2)
     except FileNotFoundError:
         pass
 
@@ -308,7 +306,21 @@ def get_maxloading(net):
     return max_loading
 
 
-def get_nosolves(ns_net, g_outagekeys, b_outagekeys, gendict, linedict, xfmrdict):
+def get_minmax_voltage(net, busdict):
+    min_voltage = 9.99
+    max_voltage = 0.00
+    for bus in busdict:
+        kv_nom, vlow, vhigh = busdict[bus]
+        pu_voltage = net.res_bus.loc[bus, 'vm_pu']
+        kv_voltage = pu_voltage * kv_nom
+        if pu_voltage < vlow and pu_voltage < min_voltage:
+            min_voltage = pu_voltage
+        if pu_voltage > vhigh and pu_voltage > max_voltage:
+            max_voltage = pu_voltage
+    return min_voltage, max_voltage
+
+
+def get_nosolves(ns_net, g_outagekeys, b_outagekeys, gendict, linedict, xfmrdict, step):
     not_solved = False
     solvedoutages = []                                                                              # initialize solved outages list
     nosolveoutages = []                                                                             # initialize nosolve outages list
@@ -322,15 +334,12 @@ def get_nosolves(ns_net, g_outagekeys, b_outagekeys, gendict, linedict, xfmrdict
         except:                                                                                     # if no solution...
             not_solved = True                                                                       # set nosovlve flag
             nosolveoutages.append(g_key)                                                            # append not solved outages list
-            # print('GEN  {0:9s} NOT SOLVED ..........................................'.format(g_key))
     for b_key in b_outagekeys:                                                                      # loop through branch outages
         net = copy.deepcopy(ns_net)                                                                 # get fresh copy of nosolve network
         if b_key in linedict:                                                                       # check if branch is a line...
-            text1 = 'LINE'                                                                          # assign text
             line_idx = linedict[b_key]                                                              # get line index
             net.line.in_service[line_idx] = False                                                   # switch out outaged line
         elif b_key in xfmrdict:                                                                     # check if branch is a xfmr...
-            text1 = 'XFMR'                                                                          # assign text
             xfmr_idx = xfmrdict[b_key]                                                              # get xfmr index
             net.trafo.in_service[xfmr_idx] = False                                                  # switch out outaged xfmr
         try:                                                                                        # try straight powerflow solution
@@ -339,18 +348,64 @@ def get_nosolves(ns_net, g_outagekeys, b_outagekeys, gendict, linedict, xfmrdict
         except:                                                                                     # if no solution...
             not_solved = True                                                                       # set nosovlve flag
             nosolveoutages.append(b_key)                                                            # append not solved outages list
-            # print(text1, '{0:9s} NOT SOLVED ..........................................'.format(b_key))
-    nstext = 'NONE'
     if not_solved:
-        nstext = '{0:d} NOSOLVES'.format(len(nosolveoutages))
-    print('CHECKED FOR NOSOLVE CONTINGENCIES ..................................', nstext)
+        nstext = '{0:<2d} NOSOLVES'.format(len(nosolveoutages))
+        print('PASS{0:2d} HAS NOSOLVE CONTINGENCIES ...................................'.format(step), nstext)
     return not_solved, solvedoutages, nosolveoutages
 
 
-def get_contrained_outages(c_net, solvedoutages, onlinegens, gendict, linedict, xfmrdict):
-    has_constraint = False                                                                          # initialize contraint flag
-    constrainedoutages = []                                                                         # initialize constrained outages list
-    penalty = 0.0
+def get_voltage_contrained_outages(c_net, solvedoutages, onlinegens, gendict, linedict, xfmrdict, busdict, step):
+    has_voltage_constraint = False
+    voltage_constrained_outages = []
+    volt_penalty = 0.0
+    otext = ''                                                                                      # initialize outage text
+    for o_key in solvedoutages:                                                                     # loop across solved contingencies
+        net = copy.deepcopy(c_net)                                                                  # get fresh copy of network
+        if o_key in onlinegens:                                                                     # check if a generator...
+            otext = 'GEN '                                                                          # assign text
+            g_idx = gendict[o_key]                                                                  # get generator index
+            net.gen.in_service[g_idx] = False                                                       # switch off outaged generator
+        elif o_key in linedict:                                                                     # check if a line...
+            otext = 'LINE'                                                                          # assign text
+            line_idx = linedict[o_key]                                                              # get line index
+            net.line.in_service[line_idx] = False                                                   # switch out outaged line
+        elif o_key in xfmrdict:                                                                     # check if a xfmr...
+            otext = 'XFMR'                                                                          # assign text
+            xfmr_idx = xfmrdict[o_key]                                                              # get xfmr index
+            net.trafo.in_service[xfmr_idx] = False                                                  # switch out outaged xfmr
+        try:                                                                                        # try straight powerflow solution
+            pp.runpp(net, enforce_q_lims=True)                                                      # run powerflow
+            min_busvoltage, max_busvoltage = get_minmax_voltage(net, busdict)
+            if min_busvoltage < 9.99:
+                has_voltage_constraint = True                                                       # set constraint flag
+                voltage_constrained_outages.append([abs(1.0 - min_busvoltage), o_key])              # add outage to constrained outages list
+                print('min bus voltage =', min_busvoltage)
+
+            if max_busvoltage > 0.00:
+                has_voltage_constraint = True                                                       # set constraint flag
+                voltage_constrained_outages.append([abs(1.0 - max_busvoltage), o_key])              # add outage to constrained outages list
+        except:                                                                                     # if no solution...
+            print(otext, '{0:9s} NOT SOLVED USING INITIAL SCOPF BASECASE .............'.format(o_key))
+
+    voltage_constrained_outages.sort(reverse=True)                                                  # sort constrained outages list
+    for c in voltage_constrained_outages:                                                           # loop across constrained outages
+        volt_penalty += c[0]                                                                        # increment flow_penalty
+    volt_penalty = round(volt_penalty, 2)                                                           # round total penalty to 2 places
+    voltage_constrained_outages = [x[1] for x in voltage_constrained_outages]                       # return only the keys of the contrained outages
+
+    if has_voltage_constraint:                                                                      # if constraint exists...
+        num_text = '{0:<2d}'.format(len(voltage_constrained_outages))                               # assign number of constraint text
+        penalty_text = 'PENALTY = ' + str(volt_penalty)                                             # assign penalty text
+        print('PASS{0:2d} HAS VOLTAGE CONSTRAINTS .....................................'.format(step), num_text, penalty_text)  # print constraints info
+
+    return has_voltage_constraint, voltage_constrained_outages, volt_penalty
+
+
+def get_loading_contrained_outages(c_net, solvedoutages, onlinegens, gendict, linedict, xfmrdict, step):
+    loading_constrained_outages = []                                                                         # initialize constrained outages list
+    loading_penalty = 0.0
+    has_loading_constraint = False                                                                          # initialize contraint flag
+
     otext = ''                                                                                      # initialize outage text
     for o_key in solvedoutages:                                                                     # loop across solved contingencies
         net = copy.deepcopy(c_net)                                                                  # get fresh copy of network
@@ -370,22 +425,23 @@ def get_contrained_outages(c_net, solvedoutages, onlinegens, gendict, linedict, 
             pp.runpp(net, enforce_q_lims=True)                                                      # run powerflow
             maxloading = get_maxloading(net)                                                        # get max branch loading
             if maxloading > 100.0:                                                                  # if max loading < 100%
-                has_constraint = True                                                               # set constraint flag
-                constrainedoutages.append([maxloading, o_key])                                      # add outage to constrained outages list
+                has_loading_constraint = True                                                       # set constraint flag
+                loading_constrained_outages.append([maxloading - 100.0, o_key])                     # add outage to constrained outages list
         except:                                                                                     # if no solution...
-            print(otext, '{0:9s} NOT SOLVED USING INITIAL SCOPF BASECASE .............'.format(o_key))
-    constrainedoutages.sort(reverse=True)                                                           # sort constrained outages list
-    for c in constrainedoutages:                                                                    # loop across constrained outages
-        penalty += c[0] - 100.0                                                                     # increment penalty
-    penalty = round(penalty, 3)                                                                     # round total penalty to 3 places
-    constrainedoutages = [x[1] for x in constrainedoutages]                                         # return only the keys of the contrained outages
+            print(otext, '{0:9s} NOT SOLVED USING SCOPF BASECASE .....................'.format(o_key))
 
-    ctext = 'NO CONTRAINTS'                                                                         # initialize constraint text
-    if has_constraint:                                                                              # if constraint exists...
-        ctext = '{0:d} CONTRAINTS'.format(len(constrainedoutages))                                  # assign constraint text
-    ptext = '(' + str(penalty) + ')'                                                                # assign penalty text
-    print('   CHECKED OUTAGES FOR LOADING CONSTRAINTS .........................', ctext, ptext)     # print constraints info
-    return has_constraint, constrainedoutages, penalty
+    loading_constrained_outages.sort(reverse=True)                                                  # sort constrained outages list
+    for c in loading_constrained_outages:                                                           # loop across constrained outages
+        loading_penalty += c[0]                                                                     # increment loading_penalty
+    loading_penalty = round(loading_penalty, 1)                                                     # round total loading_penalty to 3 places
+    loading_constrained_outages = [x[1] for x in loading_constrained_outages]                       # return only the keys of the contrained outages
+
+    if has_loading_constraint:                                                                      # if constraint exists...
+        num_text = '{0:<2d}'.format(len(loading_constrained_outages))                               # assign constraint text
+        penalty_text = 'PENALTY = ' + str(loading_penalty)                                          # assign loading_penalty text
+        print('PASS{0:2d} HAS LOADING CONSTRAINTS .....................................'.format(step), num_text, penalty_text)     # print constraints info
+
+    return has_loading_constraint, loading_constrained_outages, loading_penalty
 
 
 def print_dataframes_results(_net):
@@ -393,7 +449,7 @@ def print_dataframes_results(_net):
     pdoptions.display.max_rows = 10000
     pdoptions.display.max_colwidth = 100
     pdoptions.display.width = None
-    pdoptions.display.precision = 4
+    pdoptions.display.precision = 6
     # print()
     # print('BUS DATAFRAME')
     # print(_net.bus)
@@ -541,6 +597,7 @@ if __name__ == "__main__":
     # == ADD BUSES TO NETWORK =====================================================================
     # buses = (bus.i, bus.name, bus.ide, bus.baskv, bus.area, bus.vm, bus.va, bus.nvhi, bus.nvlo, bus.evhi, bus.evlo)
     print('ADD BUSES ..........................................................')
+    bus_dict = {}
     busnomkv_dict = {}
     buskv_dict = {}
     busarea_dict = {}
@@ -562,6 +619,7 @@ if __name__ == "__main__":
         idx = pp.create_bus(net_c, vn_kv=busnomkv, name=bus.name, zone=busarea, max_vm_pu=bus.evhi-1e-4, min_vm_pu=bus.evlo+1e-4, in_service=True, index=busnum)
         if busnum == swingbus:
             swingbus_idx = idx
+        bus_dict.update({busnum: [busnomkv, bus.nvlo, bus.nvhi]})
         busnomkv_dict.update({busnum: busnomkv})
         buskv_dict.update({busnum: buskv})
         busarea_dict.update({busnum: busarea})
@@ -1001,29 +1059,34 @@ if __name__ == "__main__":
     pp.runpp(net_a, enforce_q_lims=True)                                                            # SOLVE INITIAL BASE NETWORK
     pp.runpp(net_c, enforce_q_lims=True)                                                            # SOLVE INITIAL CONTINGENCY NETWORK
 
-    # ---------------------------------------------------------------------------------------------
+    # *********************************************************************************************
     # -- FIND BASECASE SCOPF OPERATING POINT ------------------------------------------------------
-    # ---------------------------------------------------------------------------------------------
+    # *********************************************************************************************
     print('-------------------- ATTEMPTING BASECASE SCOPF ---------------------')
     opf_startime = time.time()
-    weights = []
-    previous_weights = []
-    scopf_step = 0
+
+    # ---------------------------------------------------------------------------------------------
+    # -- TRY TO MINIMIZE LOADING CONSTRAINTS ------------------------------------------------------
+    # ---------------------------------------------------------------------------------------------
+    loading_penalties = []
+    previous_loading_penalties = []
+    loading_step = 0
 
     # -- CHECK CONTINGENCIES FOR NO SOLUTION ------------------------------------------------------
-    nosolve, solved_outages, nosolve_outages = get_nosolves(net_c, goutagekeys, boutagekeys, gen_dict, line_dict, xfmr_dict)
+    nosolve, solved_outages, nosolve_outages = get_nosolves(net_c, goutagekeys, boutagekeys, gen_dict, line_dict, xfmr_dict, loading_step)
 
-    # -- FIND OUTAGES RESULTING IN LOADING CONSTRAINTS --------------------------------------------  # TODO and voltage constraints
-    constraint, constrained_outages, weight = get_contrained_outages(net_c, solved_outages, online_gens, gen_dict, line_dict, xfmr_dict)
-    weights.append(weight)                                                                          # ADD LOADING WEIGHT TO WEIGHTS LIST
-    weights = list(set(weights))                                                                    # REMOVE DUPLICATES FROM WEIGHTS LIST
-    weights.sort()                                                                                  # SORT LOADING WEIGHTS LIST
+    # -- FIND OUTAGES RESULTING IN LOADING CONSTRAINTS --------------------------------------------
+    constraint, constrained_outages, penalty = get_loading_contrained_outages(net_c, solved_outages, online_gens, gen_dict, line_dict, xfmr_dict, loading_step)
+    loading_penalties.append(penalty)                                                               # ADD LOADING PENALTY TO LIST
+    loading_penalties = list(set(loading_penalties))                                                # REMOVE DUPLICATES FROM LIST
+    loading_penalties.sort()                                                                        # SORT LOADING LIST
 
-    # -- IF CONSTRAINT, LOOP TO FIND MINIMUM PENALTY ----------------------------------------------
-    scopf_step += 1                                                                                 # INCREMENT ITERATOR
+    net = copy.deepcopy(net_c)                                                                      # INITIALIZE SCOPF NETWORK
+
+    # -- IF LOADING CONSTRAINT, LOOP TO FIND MINIMUM PENALTY --------------------------------------
+    loading_step += 1                                                                               # INCREMENT ITERATOR
     stop = False                                                                                    # INITIALIZE WHILE LOOP STOP FLAG
-    net = copy.deepcopy(net_c)                                                                      # INITIALIZE NETWORK
-    while constraint and not stop and scopf_step < 10:                                              # LOOP WHILE THERE IS A CONSTRAINT
+    while constraint and not stop and loading_step < 10:                                            # LOOP WHILE THERE IS A CONSTRAINT
         constraint = False                                                                          # SET CONSTRAINT FLAG
         previous_net = copy.deepcopy(net)                                                           # GET COPY OF NETWORK BEFORE OUTAGE
         o_key = constrained_outages[0]                                                              # GET WORST CONSTRAINED OUTAGE
@@ -1054,6 +1117,7 @@ if __name__ == "__main__":
                 shbus = swshbus_dict[shidx]                                                         # GET SWSHUNT BUS
                 net.gen.loc[shidx, 'vm_pu'] = net.res_bus.loc[shbus, 'vm_pu']                       # SET THIS NETWORK SWSHUNT VREG TO OPF RESULTS
             pp.runpp(net, enforce_q_lims=True)                                                      # RUN POWERFLOW
+
             if o_type == 'GEN':                                                                     # IF OUTAGE WAS A GENERATOR...
                 net.gen.in_service[o_idx] = True                                                    # PUT GENERATOR BACK IN-SERVICE
             if o_type == 'LINE':                                                                    # IF OUTAGE WAS A LINE...
@@ -1062,18 +1126,93 @@ if __name__ == "__main__":
                 net.trafo.in_service[o_idx] = True                                                  # PUT XFMR BACK IN-SERVICE
             pp.runpp(net, init='results', enforce_q_lims=True)                                      # RUN POWERFLOW
 
-            previous_weights = list(weights)                                                        # COPY OUTAGE WEIGHTS BEFORE RUNNING OUTAGES AGAIN
-            nosolve, solved_outages, nosolve_outages = get_nosolves(net, goutagekeys, boutagekeys, gen_dict, line_dict, xfmr_dict)
-            constraint, constrained_outages, weight = get_contrained_outages(net, solved_outages, online_gens, gen_dict, line_dict, xfmr_dict)
-            weights.append(weight)                                                                  # ADD LOADING WEIGHT TO WEIGHTS LIST
-            weights = list(set(weights))                                                            # REMOVE DUPLICATES FROM WEIGHTS LIST
-            weights.sort()                                                                          # SORT LOADING WEIGHTS LIST
-            if weights == previous_weights and weight == min(weights):                              # IF LIST REPEATS AND WEIGHT IS MINIMUM...
+            previous_loading_penalties = list(loading_penalties)                                          # COPY OUTAGE penalties BEFORE RUNNING OUTAGES AGAIN
+            nosolve, solved_outages, nosolve_outages = get_nosolves(net, goutagekeys, boutagekeys, gen_dict, line_dict, xfmr_dict, loading_step)
+            constraint, constrained_outages, penalty = get_loading_contrained_outages(net, solved_outages, online_gens, gen_dict, line_dict, xfmr_dict, loading_step)
+
+            loading_penalties.append(penalty)                                                     # ADD LOADING penalty TO penalties LIST
+            loading_penalties = list(set(loading_penalties))                                              # REMOVE DUPLICATES FROM penalties LIST
+            loading_penalties.sort()                                                                   # SORT LOADING penalties LIST
+            if loading_penalties == previous_loading_penalties and penalty == min(loading_penalties):   # IF LIST REPEATS AND penalty IS MINIMUM...
                 stop = True                                                                         # STOP LOOPING
         except:                                                                                             # IF NO OPF SOLUTION...
             print(o_type, '{0:9s} DID NOT SOLVE WITH OPF ..............................'.format(o_key))     # PRINT OUTAGE INFO
             net = previous_net                                                                              # LOAD PRE-OUTAGE NETWORK
-        scopf_step += 1
+        loading_step += 1
+
+    # ---------------------------------------------------------------------------------------------
+    # -- TRY TO MINIMIZE VOLTAGE CONSTRAINTS ------------------------------------------------------
+    # ---------------------------------------------------------------------------------------------
+    # voltage_penalties = []
+    # previous_voltage_penalties = []
+    # voltage_step = 0
+    #
+    # # -- CHECK CONTINGENCIES FOR NO SOLUTION ------------------------------------------------------
+    # nosolve, solved_outages, nosolve_outages = get_nosolves(net, goutagekeys, boutagekeys, gen_dict, line_dict, xfmr_dict, voltage_step)
+    #
+    # # -- FIND OUTAGES RESULTING IN VOLTAGE CONSTRAINTS --------------------------------------------
+    # constraint, constrained_outages, penalty = get_voltage_contrained_outages(net, solved_outages, online_gens, gen_dict, line_dict, xfmr_dict, bus_dict, voltage_step)
+    # voltage_penalties.append(penalty)                                                              # ADD LOADING PENALTY TO LIST
+    # voltage_penalties = list(set(voltage_penalties))                                               # REMOVE DUPLICATES FROM LIST
+    # voltage_penalties.sort()                                                                       # SORT LIST
+    #
+    # # -- IF VOLTAGE CONSTRAINT, LOOP TO FIND MINIMUM PENALTY --------------------------------------
+    # voltage_step += 1                                                                               # INCREMENT ITERATOR
+    # stop = False                                                                                    # INITIALIZE WHILE LOOP STOP FLAG
+    # # net = copy.deepcopy(net_c)                                                                      # INITIALIZE NETWORK
+    # while constraint and not stop and voltage_step < 10:                                            # LOOP WHILE THERE IS A CONSTRAINT
+    #     constraint = False                                                                          # SET constraint FLAG
+    #     previous_net = copy.deepcopy(net)                                                           # GET COPY OF NETWORK BEFORE OUTAGE
+    #     o_key = constrained_outages[0]                                                              # GET WORST CONSTRAINED OUTAGE
+    #     if o_key in online_gens:                                                                    # CHECK IF A GENERATOR...
+    #         o_type = 'GEN'                                                                          # ASSIGN TEXT
+    #         o_idx = gen_dict[o_key]                                                                 # GET GENERATOR INDEX
+    #         net.gen.in_service[o_idx] = False                                                       # SWITCH OFF OUTAGED GENERATOR
+    #     elif o_key in line_dict:                                                                    # CHECK IF A LINE...
+    #         o_type = 'LINE'                                                                         # ASSIGN TEXT
+    #         o_idx = line_dict[o_key]                                                                # GET LINE INDEX
+    #         net.line.in_service[o_idx] = False                                                      # SWITCH OUT OUTAGED LINE
+    #     elif o_key in xfmr_dict:                                                                    # CHECK IF A XFMR...
+    #         o_type = 'XFMR'                                                                         # ASSIGN TEXT
+    #         o_idx = xfmr_dict[o_key]                                                                # GET XFMR INDEX
+    #         net.trafo.in_service[o_idx] = False                                                     # SWITCH OUT OUTAGED XFMR
+    #
+    #     try:                                                                                        # TRY TO SOLVE WITH OPF
+    #         pp.runopp(net, init='pf', enforce_q_lims=True)                                          # RUN OPF ON THIS NETWORK
+    #         net.gen['p_mw'] = net.res_gen['p_mw']                                                   # SET THIS NETWORK GENERATORS POWER TO OPF RESULTS
+    #         for gkey in gen_dict:                                                                   # LOOP ACROSS GENERATOR KEYS
+    #             gidx = gen_dict[gkey]                                                               # GET GENERATOR INDEX
+    #             genbus = genbus_dict[gidx]                                                          # GET GENERATOR BUS
+    #             if genbus == swingbus:                                                              # CHECK IF SWING BUS...
+    #                 continue                                                                        # IF SWING BUS, GET NEXT GENERATOR
+    #             net.gen.loc[gidx, 'vm_pu'] = net.res_bus.loc[genbus, 'vm_pu']                       # SET THIS NETWORK GENS VREG TO OPF RESULTS
+    #         for shkey in swsh_dict:                                                                 # LOOP ACROSS SWSHUNT KEYS
+    #             shidx = swsh_dict[shkey]                                                            # GET SWSHUNT INDEX
+    #             shbus = swshbus_dict[shidx]                                                         # GET SWSHUNT BUS
+    #             net.gen.loc[shidx, 'vm_pu'] = net.res_bus.loc[shbus, 'vm_pu']                       # SET THIS NETWORK SWSHUNT VREG TO OPF RESULTS
+    #         pp.runpp(net, enforce_q_lims=True)                                                      # RUN POWERFLOW
+    #
+    #         if o_type == 'GEN':                                                                     # IF OUTAGE WAS A GENERATOR...
+    #             net.gen.in_service[o_idx] = True                                                    # PUT GENERATOR BACK IN-SERVICE
+    #         if o_type == 'LINE':                                                                    # IF OUTAGE WAS A LINE...
+    #             net.line.in_service[o_idx] = True                                                   # PUT LINE BACK IN-SERVICE
+    #         if o_type == 'XFMR':                                                                    # IF OUTAGE WAS A XFMR...
+    #             net.trafo.in_service[o_idx] = True                                                  # PUT XFMR BACK IN-SERVICE
+    #         pp.runpp(net, init='results', enforce_q_lims=True)                                      # RUN POWERFLOW
+    #
+    #         previous_voltage_penalties = list(voltage_penalties)                                    # COPY OUTAGE PENALTIES BEFORE RUNNING OUTAGES AGAIN
+    #         nosolve, solved_outages, nosolve_outages = get_nosolves(net, goutagekeys, boutagekeys, gen_dict, line_dict, xfmr_dict, voltage_step)
+    #         constraint, constrained_outages, penalty = get_voltage_contrained_outages(net, solved_outages, online_gens, gen_dict, line_dict, xfmr_dict, bus_dict, voltage_step)
+    #
+    #         voltage_penalties.append(penalty)                                                       # ADD LOADING penalty TO penalties LIST
+    #         voltage_penalties = list(set(voltage_penalties))                                        # REMOVE DUPLICATES FROM penalties LIST
+    #         voltage_penalties.sort()                                                                # SORT LOADING penalties LIST
+    #         if voltage_penalties == previous_voltage_penalties and penalty == min(voltage_penalties):   # IF LIST REPEATS AND penalty IS MINIMUM...
+    #             stop = True                                                                             # STOP LOOPING
+    #     except:                                                                                         # IF NO OPF SOLUTION...
+    #         print(o_type, '{0:9s} DID NOT SOLVE WITH OPF ..............................'.format(o_key))     # PRINT OUTAGE INFO
+    #         net = previous_net                                                                              # LOAD PRE-OUTAGE NETWORK
+    #     voltage_step += 1
 
     # ---------------------------------------------------------------------------------------------
     # -- CREATE FINAL SCOPF NETWORKS --------------------------------------------------------------
@@ -1081,6 +1220,7 @@ if __name__ == "__main__":
     print('------------------ CREATING FINAL SCOPF NETWORKS -------------------')
 
     # -- COPY SCOPF RESULTS TO BASECASE AND CONTINGENCY NETWORKS ----------------------------------
+    net.gen['p_mw'] = net.res_gen['p_mw']                                                           # SET THIS NETWORK GENERATORS POWER TO SCOPF RESULTS
     net_a.gen['p_mw'] = net.res_gen['p_mw']                                                         # SET THIS NETWORK GENERATORS POWER TO SCOPF RESULTS
     net_c.gen['p_mw'] = net.res_gen['p_mw']                                                         # SET THIS NETWORK GENERATORS POWER TO SCOPF RESULTS
     for gkey in gen_dict:                                                                           # LOOP ACROSS GENERATOR KEYS
@@ -1088,32 +1228,54 @@ if __name__ == "__main__":
         genbus = genbus_dict[gidx]                                                                  # GET GENERATOR BUS
         if genbus == swingbus:                                                                      # CHECK IF SWING BUS...
             continue                                                                                # IF SWING BUS, GET NEXT GENERATOR
+        net.gen.loc[gidx, 'vm_pu'] = net.res_bus.loc[genbus, 'vm_pu']                               # SET THIS NETWORK GENS VREG TO SCOPF RESULTS
         net_a.gen.loc[gidx, 'vm_pu'] = net.res_bus.loc[genbus, 'vm_pu']                             # SET THIS NETWORK GENS VREG TO SCOPF RESULTS
         net_c.gen.loc[gidx, 'vm_pu'] = net.res_bus.loc[genbus, 'vm_pu']                             # SET THIS NETWORK GENS VREG TO SCOPF RESULTS
     for shkey in swsh_dict:                                                                         # LOOP ACROSS SWSHUNT KEYS
         shidx = swsh_dict[shkey]                                                                    # GET SWSHUNT INDEX
         shbus = swshbus_dict[shidx]                                                                 # GET SWSHUNT BUS
+        net.gen.loc[shidx, 'vm_pu'] = net.res_bus.loc[shbus, 'vm_pu']                               # SET THIS NETWORK SWSHUNT VREG TO SCOPF RESULTS
         net_a.gen.loc[shidx, 'vm_pu'] = net.res_bus.loc[shbus, 'vm_pu']                             # SET THIS NETWORK SWSHUNT VREG TO SCOPF RESULTS
         net_c.gen.loc[shidx, 'vm_pu'] = net.res_bus.loc[shbus, 'vm_pu']                             # SET THIS NETWORK SWSHUNT VREG TO SCOPF RESULTS
+    pp.runpp(net, enforce_q_lims=True)                                                              # THIS NETWORK, RUN STRAIGHT POWER FLOW
     pp.runpp(net_a, enforce_q_lims=True)                                                            # THIS NETWORK, RUN STRAIGHT POWER FLOW
     pp.runpp(net_c, enforce_q_lims=True)                                                            # THIS NETWORK, RUN STRAIGHT POWER FLOW
 
     # -- FINAL ATTEMPT AT BETTER ESTIMATE FOR SWING VREG ------------------------------------------
-    net = copy.deepcopy(net_a)                                                                      # GET FRESH NETWORK
-    pp.runpp(net, enforce_q_lims=True)                                                              # THIS NETWORK, RUN STRAIGHT POWER FLOW
     nlevel_buses_v = [x for x in net.res_bus.loc[nlevel_buses, 'vm_pu']]                            # GET LIST OF NLEVEL BUS VOLTAGES
     max_v = max(nlevel_buses_v)                                                                     # GET MAX VOLTAGE OF NLEVEL BUSES
+    net.gen.loc[swinggen_idxs, 'vm_pu'] = max_v                                                     # SET SWING GENS VREG = MAX OF NLEVEL BUSES VOLTAGE
+    net.ext_grid.loc[ext_grid_idx, 'vm_pu'] = max_v                                                 # SET EXTGRID VREG = MAX OF NLEVEL BUSES VOLTAGE
     net_a.gen.loc[swinggen_idxs, 'vm_pu'] = max_v                                                   # SET SWING GENS VREG = MAX OF NLEVEL BUSES VOLTAGE
     net_a.ext_grid.loc[ext_grid_idx, 'vm_pu'] = max_v                                               # SET EXTGRID VREG = MAX OF NLEVEL BUSES VOLTAGE
     net_c.gen.loc[swinggen_idxs, 'vm_pu'] = max_v                                                   # SET SWING GENS VREG = MAX OF NLEVEL BUSES VOLTAGE
     net_c.ext_grid.loc[ext_grid_idx, 'vm_pu'] = max_v                                               # SET EXTGRID VREG = MAX OF NLEVEL BUSES VOLTAGE
-    pp.runpp(net_a, enforce_q_lims=True)                                                            # SOLVE INITIAL BASE NETWORK
-    pp.runpp(net_c, enforce_q_lims=True)                                                            # SOLVE INITIAL CONTINGENCY NETWORK
+    pp.runpp(net, enforce_q_lims=True)                                                              # THIS NETWORK, RUN STRAIGHT POWER FLOW
+    pp.runpp(net_a, enforce_q_lims=True)                                                            # THIS NETWORK, RUN STRAIGHT POWER FLOW
+    pp.runpp(net_c, enforce_q_lims=True)                                                            # THIS NETWORK, RUN STRAIGHT POWER FLOW
+
+    # -- INSURE GENERATORS ARE MEETING VOLTAGE SCHEDULE -------------------------------------------
+    for gkey in gen_dict:                                                                           # LOOP ACROSS GENERATOR KEYS
+        gidx = gen_dict[gkey]                                                                       # GET GENERATOR INDEX
+        genbus = genbus_dict[gidx]                                                                  # GET GENERATOR BUS
+        qgen = net.res_gen.loc[gidx, 'q_mvar']                                                      # THIS GENERATORS QGEN
+        qmin = net.gen.loc[gidx, 'min_q_mvar']                                                      # THIS GENERATORS QMIN
+        qmax = net.gen.loc[gidx, 'max_q_mvar']                                                      # THIS GENERATORS QMAX
+        bus_voltage = net.res_bus.loc[genbus, 'vm_pu']                                              # THIS GENERATORS BUS VOLTAGE
+        if genbus == swingbus:                                                                      # CHECK IF SWING BUS...
+            continue                                                                                # IF SWING BUS, GET NEXT GENERATOR
+        if qgen == qmin or qgen == qmax:                                                            # IF THIS GENERATOR AT +/- QLIMIT...
+            net.gen.loc[gidx, 'vm_pu'] = bus_voltage                                                # THIS NETWORK, SET THIS GENERATORS VREG TO BUS VOLTAGE
+            net_a.gen.loc[gidx, 'vm_pu'] = bus_voltage                                              # THIS NETWORK, SET THIS GENERATORS VREG TO BUS VOLTAGE
+            net_c.gen.loc[gidx, 'vm_pu'] = bus_voltage                                              # THIS NETWORK, SET THIS GENERATORS VREG TO BUS VOLTAGE
+            pp.runpp(net, init='results', enforce_q_lims=True)                                      # THIS NETWORK, RUN STRAIGHT POWER FLOW
+            pp.runpp(net_a, init='results', enforce_q_lims=True)                                    # THIS NETWORK, RUN STRAIGHT POWER FLOW
+            pp.runpp(net_c, init='results', enforce_q_lims=True)                                    # THIS NETWORK, RUN STRAIGHT POWER FLOW
 
     # -- INSURE SWSHUNTS SUSCEPTANCE IS WITHIN LIMITS IN BASECASE ---------------------------------
     # -- HOPE CONSERVATIVE ENOUGH TO HOLD UP WITH CONTINGENCIES -----------------------------------
-    net = copy.deepcopy(net_a)                                                                      # GET FRESH NETWORK
-    pp.runpp(net, enforce_q_lims=True)                                                              # THIS NETWORK, RUN STRAIGHT POWER FLOW
+    # net = copy.deepcopy(net_a)                                                                      # GET FRESH NETWORK
+    # pp.runpp(net, enforce_q_lims=True)                                                              # THIS NETWORK, RUN STRAIGHT POWER FLOW
     for shkey in swsh_dict:                                                                         # LOOP ACROSS SWSHUNT KEYS
         shidx = swsh_dict[shkey]                                                                    # GET SWSHUNT INDEX
         shbus = swshbus_dict[shidx]                                                                 # GET SWSHUNT BUS
@@ -1127,15 +1289,16 @@ if __name__ == "__main__":
                 net.gen.loc[shidx, 'min_q_mvar'] = new_qmin                                         # ADJUST QMIN IN POSITIVE DIRECTION WITH SOME EXTRA
                 net_a.gen.loc[shidx, 'min_q_mvar'] = new_qmin                                       # ADJUST QMIN IN POSITIVE DIRECTION WITH SOME EXTRA
                 net_c.gen.loc[shidx, 'min_q_mvar'] = new_qmin                                       # ADJUST QMIN IN POSITIVE DIRECTION WITH SOME EXTRA
-                # print(shkey, 'Adj QMIN Up', 'QMIN =', qmin, 'NEW QMIN =', new_qmin)
-                pp.runpp(net, enforce_q_lims=True)                                                  # THIS NETWORK, RUN STRAIGHT POWER FLOW
+                # print(shkey, 'Adj QMIN Up', 'QMIN =', qmin, 'NEW QMIN =', new_qmin)               # DEVELOPEMENT... PRINT MESSAGE
             elif qgen / voltage ** 2 > 0.98 * qmax > 0.0:                                           # CHECK IF QMAX IS NEGATIVE AND SUSCEPTANCE OUT OF BOUNDS
                 new_qmax = max(qmin, 0.99 * qmax * voltage ** 2)                                    # CALCULATE QMAX THAT IS IN BOUNDS
                 net.gen.loc[shidx, 'max_q_mvar'] = new_qmax                                         # ADJUST QMAX IN NEGATIVE DIRECTION WITH SOME EXTRA
                 net_a.gen.loc[shidx, 'max_q_mvar'] = new_qmax                                       # ADJUST QMAX IN NEGATIVE DIRECTION WITH SOME EXTRA
                 net_c.gen.loc[shidx, 'max_q_mvar'] = new_qmax                                       # ADJUST QMAX IN NEGATIVE DIRECTION WITH SOME EXTRA
-                # print(shkey, 'Adj QMAX Down', 'QMAX =', qmax, 'NEW QMAX =', new_qmax)
-                pp.runpp(net, enforce_q_lims=True)                                                  # THIS NETWORK, RUN STRAIGHT POWER FLOW
+                # print(shkey, 'Adj QMAX Down', 'QMAX =', qmax, 'NEW QMAX =', new_qmax)             # DEVELOPEMENT... PRINT MESSAGE
+            pp.runpp(net, init='results', enforce_q_lims=True)                                      # THIS NETWORK, RUN STRAIGHT POWER FLOW
+            pp.runpp(net_a, init='results', enforce_q_lims=True)                                    # THIS NETWORK, RUN STRAIGHT POWER FLOW
+            pp.runpp(net_c, init='results', enforce_q_lims=True)                                    # THIS NETWORK, RUN STRAIGHT POWER FLOW
 
     external_pgen = net_a.res_ext_grid.loc[ext_grid_idx, 'p_mw']                                    # GET EXTERNAL GRID REAL POWER
     external_qgen = net_a.res_ext_grid.loc[ext_grid_idx, 'q_mvar']                                  # GET EXTERNAL GRID REACTIVE POWER
@@ -1262,198 +1425,17 @@ if __name__ == "__main__":
     # =============================================================================================
     # -- WRITE MISC DATA TO FILE (READ IN MYPYTHON2) ----------------------------------------------
     # =============================================================================================
-    write_starttime = time.time()
-    pp.to_pickle(net_a, neta_fname)                                                                 # WRITE BASECASE RATEA NETWORK TO FILE
-    pp.to_pickle(net_c, netc_fname)                                                                 # WRITE CONTINGENCY RATEC NETWORK TO FILE
-    PFile = open(data_fname, 'wb')                                                                  # OPEN PICKLE FILE
-    pickle.dump([base_pgens, ext_grid_idx, genbuses, genbus_dict, Gids, line_dict, goutagekeys,
-                 boutagekeys, outage_dict, gen_dict, pfactor_dict, xfmr_dict, area_swhunts,
-                 swsh_dict, swshbus_dict, swshidxs, swshidx_dict, busarea_dict, branch_areas,
-                 area_participating_gens, swinggen_idxs, alt_sw_genkey, tie_idx, alt_tie_idx], PFile)   # WRITE MISC DATA TO PICKLE FILE
-    PFile.close()                                                                                       # CLOSE PICKLE FILE
+    # write_starttime = time.time()
+    # pp.to_pickle(net_a, neta_fname)                                                                 # WRITE BASECASE RATEA NETWORK TO FILE
+    # pp.to_pickle(net_c, netc_fname)                                                                 # WRITE CONTINGENCY RATEC NETWORK TO FILE
+    # PFile = open(data_fname, 'wb')                                                                  # OPEN PICKLE FILE
+    # pickle.dump([base_pgens, ext_grid_idx, genbuses, genbus_dict, Gids, line_dict, goutagekeys,
+    #              boutagekeys, outage_dict, gen_dict, pfactor_dict, xfmr_dict, area_swhunts,
+    #              swsh_dict, swshbus_dict, swshidxs, swshidx_dict, busarea_dict, branch_areas,
+    #              area_participating_gens, swinggen_idxs, alt_sw_genkey, tie_idx, alt_tie_idx], PFile)   # WRITE MISC DATA TO PICKLE FILE
+    # PFile.close()                                                                                       # CLOSE PICKLE FILE
+    #
+    # print('WRITING DATA TO FILE -----------------------------------------------', round(time.time() - write_starttime, 3))
 
-    print('WRITING DATA TO FILE -----------------------------------------------', round(time.time() - write_starttime, 3))
     print('DONE ---------------------------------------------------------------')
     print('TOTAL TIME -------------------------------------------------------->', round(time.time() - start_time, 3))
-
-    # print()
-    # print('TESTING CALCULATING DELTA VARIABLES --------------------------------')
-    # # -- TODO run outages and get delta in Mypython2 ----------------------------------------------
-    # # =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
-    # # -- RUN GENERATOR OUTAGES TO FIND OPTIMUM DELTA VARIABLE -------------------------------------
-    # # =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
-    # gdelta_starttime = time.time()
-    #
-    # for genkey in goutagekeys:                                                                      # LOOP THROUGH GENERATOR OUTAGES
-    #     gnet = copy.deepcopy(net_c)                                                                 # GET FRESH COPY OF CONTINGENCY NETWORK
-    #     genidx = gen_dict[genkey]                                                                   # GET OUTAGED GENERATOR INDEX
-    #     genbus = genbus_dict[genidx]
-    #     outage_area = busarea_dict[genbus]
-    #       participating_units = area_participating_gens[outage_area]
-    #
-    #     conlabel = "'" + outage_dict['gen'][genkey] + "'"                                           # GET CONTINGENCY LABEL
-    #     gen_outage_p = base_pgens[genkey]                                                           # GET OUTAGED GENERATOR PGEN
-    #     gnet.gen.in_service[genidx] = False                                                         # SWITCH OFF OUTAGED GENERATOR
-    #
-    #     # -- TODO determine if outage is a swing generator, if so switch extgrid tie
-    #
-    #     # -- FIRST ESTIMATE OF DELTA VARIABLE -----------------------------------------------------
-    #     pfactor_total = 0.0                                                                         # INITIALIZE PARTICIPATION FACTORS TOTAL
-    #     for gen_pkey in participating_units:                                       # LOOP ACROSS AREA PARTICIPATING GENERATORS
-    #         if gen_pkey == genkey:                                                                  # DON'T WANT PFACTOR FOR OUTAGED GENERATOR
-    #             continue                                                                            # GET NEXT PARTICIPATING GENERATOR
-    #         gidx = gen_dict[gen_pkey]                                                               # GET PARTICIPATING GENERATOR INDEX
-    #         pfactor_total += pfactor_dict[gen_pkey]                                                 # INCREMENT PFACTOR TOTAL
-    #     pp.runpp(gnet, enforce_q_lims=True)                                                         # RUN STRAIGHT POWER FLOW
-    #     ex_pgen = gnet.res_ext_grid.loc[ext_grid_idx, 'p_mw']
-    #     delta_init = (gen_outage_p + ex_pgen) / pfactor_total                                       # INITIAL DELTA VARIABLE ESTIMATE
-    #
-    #     # -- ITERATE TO FIND OPTIMUM GENERATOR OUTAGE DELTA VARIABLE  ------------------------------
-    #     step = 1                                                                                    # INITIALIZE ITERATOR
-    #     delta = delta_init                                                                          # SET INITIAL DELTA VARIABL
-    #     net = copy.deepcopy(gnet)                                                                   # GET COPY OF OUTAGED NETWORK
-    #     while step < 120:                                                                           # LIMIT WHILE LOOPS
-    #         for gen_pkey in participating_units:                                                    # LOOP ACROSS AREA PARTICIPATING GENERATORS
-    #             if gen_pkey == genkey:                                                              # IF GENERATOR = OUTAGED GENERATOR
-    #                 continue                                                                        # GET NEXT GENERATOR
-    #             gidx = gen_dict[gen_pkey]                                                           # GET THIS GENERATOR INDEX
-    #             pgen_a = base_pgens[gen_pkey]                                                       # THIS GENERATORS RATEA BASECASE PGEN
-    #             pmin = net.gen.loc[gidx, 'min_p_mw']                                                # THIS GENERATORS PMIN
-    #             pmax = net.gen.loc[gidx, 'max_p_mw']                                                # THIS GENERATORS MAX
-    #             pfactor = pfactor_dict[gen_pkey]                                                    # THIS GENERATORS PARTICIPATION FACTOR
-    #             target_pgen = pgen_a + pfactor * delta                                              # CALCULATE THIS GENERATORS EXPECTED PGEN
-    #             if pmin < target_pgen < pmax:                                                       # IF EXPECTED PGEN IS IN BOUNDS...
-    #                 net.gen.loc[gidx, 'p_mw'] = target_pgen                                         # SET PGEN = EXPECTED PGEN
-    #             elif target_pgen > pmax:                                                            # IF EXPECTED PGEN > PMAX...
-    #                 net.gen.loc[gidx, 'p_mw'] = pmax                                                # SET PGEN = PMAX
-    #             elif target_pgen < pmin:                                                            # IF EXPECTED PGEN < PMIN...
-    #                 net.gen.loc[gidx, 'p_mw'] = pmin                                                # SET PGEN = PMIN
-    #         pp.runpp(net, enforce_q_lims=True)                                                      # RUN STRAIGHT POWER FLOW
-    #         ex_pgen = net.res_ext_grid.loc[ext_grid_idx, 'p_mw']                                    # GET EXTERNAL GRID POWER
-    #         if abs(ex_pgen) < 1e-3:                                                                 # IF EXTERNAL GRID POWER IS NEAR ZERO..
-    #             break                                                                               # BREAK AND GET NEXT GEN OUTAGE
-    #         delta += ex_pgen / pfactor_total                                                        # INCREMENT DELTA
-    #         step += 1                                                                               # INCREMENT ITERATION
-    #     line_loading = max(net.res_line['loading_percent'].values)                                  # GET MAX LINE LOADING
-    #     xfmr_loading = max(net.res_trafo['loading_percent'].values)                                 # GET MAX LINE LOADING
-    #     max_loading = max(line_loading, xfmr_loading)                                               # GET MAX OF MAXs
-    #     ex_pgen = net.res_ext_grid.loc[ext_grid_idx, 'p_mw']                                        # GET EXTERNAL GRID REAL POWER
-    #     ex_qgen = net.res_ext_grid.loc[ext_grid_idx, 'q_mvar']                                      # GET EXTERNAL GRID REACTIVE POWER
-    #     print('GEN {0:6s}[{1:2d}]  . . . . . . . . . . . . . . . . . . . . . . . . . . .'.format(genkey, outage_area),
-    #           '\u0394 =', round(delta, 3), '(' + str(step) + ')', round(ex_pgen, 6), round(ex_qgen, 6), round(max_loading, 1))
-    #
-    #     # ---------------------------------------------------------------------------------------------
-    #     # -- WRITE GENERATOR CONTINGENCY BUS AND GENERATOR RESULTS TO FILE ----------------------------
-    #     # ---------------------------------------------------------------------------------------------
-    #     bus_results = copy.deepcopy(net.res_bus)                                                        # GET CONTINGENCY BUS RESULTS
-    #     gen_results = copy.deepcopy(net.res_gen)                                                        # GET CONTINGENCY GENERATOR RESULTS
-    #     write_bus_results(outfname2, bus_results, swshidx_dict, gen_results, ext_grid_idx, conlabel)    # WRITE SOLUTION2 BUS RESULTS
-    #     write_gen_results(outfname2, gen_results, Gids, genbuses, delta, swshidxs)                      # WRITE SOLUTION2 GENERATOR RESULTS
-    # print('DELTAS FOR GENERATOR OUTAGES ESTIMATED .............................', round(time.time() - gdelta_starttime, 3))
-    # print()
-    #
-    #
-    # # -- TODO run outages and get delta in Mypython2 ----------------------------------------------
-    # # =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
-    # # -- RUN LINE AND XFMR OUTAGES TO FIND OPTIMUM DELTA VARIABLE ---------------------------------
-    # # =+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=
-    # bdelta_starttime = time.time()
-    #
-    # btext = ''                                                                                      # DECLARE BRANCH TYPE TEXT
-    # no_margin = []
-    #
-    # boutagekeys = ['509-510-1', '509-564-1', '509-569-1', '510-535-1', '510-557-1', '512-513-1', '512-529-1', '513-562-1', '514-536-1', '521-522-1',
-    #                '521-559-1', '522-563-1', '525-537-1', '525-562-1', '527-531-1', '527-542-1', '527-545-1', '529-531-1', '530-534-1', '530-549-1',
-    #                '532-540-1', '532-566-1', '532-570-1', '534-551-1', '535-536-1', '537-557-1', '537-563-1', '537-568-1', '540-541-1', '542-543-1',
-    #                '543-546-1', '545-547-1', '546-547-1', '546-551-1', '546-553-1', '546-554-1', '547-567-1', '552-553-1', '552-571-1', '554-555-1',
-    #                '555-565-1', '558-559-1', '564-565-1', '566-567-1', '568-569-1', '570-571-1']
-    #
-    # for branchkey in boutagekeys:                                                                   # LOOP THROUGH BRANCH OUTAGES
-    #     bnet = copy.deepcopy(net_c)                                                                 # INITIALIZE THIS CONTINGENCY NETWORK
-    #     conlabel = "'" + outage_dict['branch'][branchkey] + "'"                                     # GET CONTINGENCY LABEL
-    #     participating_units = []                                                                    # INITIALIZE PARTICIPATING GENERATOR LIST
-    #     outage_areas = branch_areas[branchkey]                                                      # GET AREAS CONNECTED TO BRANCH
-    #     for outage_area in outage_areas:                                                            # LOOP ACROSS BRANCH AREAS
-    #         participating_units += area_participating_gens[outage_area]                             # ADD AREA GENERATORS TO PARTICIPATING GENERATOR LIST
-    #
-    #     pfactor_total = 0.0                                                                         # INITIALIZE PARTICIPATION FACTORS TOTAL
-    #     for gen_pkey in participating_units:                                                        # LOOP ACROSS PARTICIPATING GENERATORS
-    #         gidx = gen_dict[gen_pkey]                                                               # GET PARTICIPATING GENERATOR INDEX
-    #         pfactor_total += pfactor_dict[gen_pkey]                                                 # INCREMENT PFACTOR TOTAL
-    #
-    #     if branchkey in line_dict:                                                                  # CHECK IF BRANCH IS A LINE...
-    #         btext = 'LINE'                                                                          # ASSIGN BRANCH TYPE TEXT
-    #         lineidx = line_dict[branchkey]                                                          # GET LINE INDEX
-    #         if not bnet.line.loc[lineidx, 'in_service']:                                            # CHECK IF OUTAGED LINE IS IN-SERVICE...
-    #             continue                                                                            # IF NOT, GET NEXT BRANCH
-    #         bnet.line.in_service[lineidx] = False                                                   # TAKE LINE OUT OF SERVICE
-    #     elif branchkey in xfmr_dict:                                                                # CHECK IF BRANCH IS A XFMR...
-    #         btext = 'XFMR'                                                                          # ASSIGN BRANCH TYPE TEXT
-    #         xfmridx = xfmr_dict[branchkey]                                                          # GET XFMR INDEX
-    #         if not bnet.trafo.loc[xfmridx, 'in_service']:                                           # CHECK IF OUTAGED XFMR IS IN-SERVICE...
-    #             continue                                                                            # IF NOT, GET NEXT BRANCH
-    #         bnet.trafo.in_service[xfmridx] = False                                                  # TAKE XFMR OUT OF SERVICE
-    #     try:                                                                                        # TRY STRAIGHT POWER FLOW
-    #         pp.runpp(bnet, enforce_q_lims=True)                                                     # RUN STRAIGHT POWER FLOW
-    #         ex_pgen0 = bnet.res_ext_grid.loc[ext_grid_idx, 'p_mw']                                    # GET EXTERNAL GRID POWER
-    #     except:                                                                                     # IF NOT SOLVED... WRITE BASECASE RESULTS AS PLACEHOLDER
-    #         delta = 0.0                                                                             # ASSIGN DELTA = 0
-    #         bus_results = copy.deepcopy(net_a.res_bus)                                              # GET BASECASE BUS RESULTS
-    #         gen_results = copy.deepcopy(net_a.res_gen)                                                      # GET BASECASE GENERATOR RESULTS
-    #         write_bus_results(outfname2, bus_results, swshidx_dict, gen_results, ext_grid_idx, conlabel)    # WRITE DUMMY BUS RESULTS TO SOLUTION2 FILE
-    #         write_gen_results(outfname2, gen_results, Gids, genbuses, delta, swshidxs)                      # WRITE DUMMY BUS RESULTS TO SOLUTION2 FILE
-    #         continue                                                                                # GET NEXT BRANCH
-    #
-    #     # -- ITERATE TO FIND OPTIMUM BRANCH OUTAGE DELTA VARIABLE  ---------------------------------
-    #     step = 1                                                                                    # INITIALIZE ITERATOR
-    #     delta = 0.0                                                                                 # INITIALIZE DELTA VARIABLE
-    #     net = copy.deepcopy(bnet)                                                                   # GET FRESH COPY INITIALIZED NETWORK
-    #     while step < 120:                                                                           # LIMIT WHILE LOOPS
-    #         for gen_pkey in participating_units:                                                    # LOOP THROUGH PARTICIPATING GENERATORS
-    #             gidx = gen_dict[gen_pkey]                                                           # GET THIS GENERATOR INDEX
-    #             pgen_a = base_pgens[gen_pkey]                                                       # THIS GENERATORS RATEA BASECASE PGEN
-    #             pmin = net.gen.loc[gidx, 'min_p_mw']                                                # THIS GENERATORS PMIN
-    #             pmax = net.gen.loc[gidx, 'max_p_mw']                                                # THIS GENERATORS MAX
-    #             pfactor = pfactor_dict[gen_pkey]                                                    # THIS GENERATORS PARTICIPATION FACTOR
-    #             target_pgen = pgen_a + pfactor * delta                                              # CALCULATE THIS GENERATORS EXPECTED PGEN
-    #             if pmin < target_pgen < pmax:                                                       # IF EXPECTED PGEN IS IN BOUNDS...
-    #                 net.gen.loc[gidx, 'p_mw'] = target_pgen                                         # SET PGEN = EXPECTED PGEN
-    #             elif target_pgen > pmax:                                                            # IF EXPECTED PGEN > PMAX...
-    #                 net.gen.loc[gidx, 'p_mw'] = pmax                                                # SET PGEN = PMAX
-    #             elif target_pgen < pmin:                                                            # IF EXPECTED PGEN < PMIN...
-    #                 net.gen.loc[gidx, 'p_mw'] = pmin                                                # SET PGEN = PMIN
-    #         pp.runpp(net, enforce_q_lims=True)                                                      # RUN STRAIGHT POWER FLOW
-    #         ex_pgen = net.res_ext_grid.loc[ext_grid_idx, 'p_mw']                                    # GET EXTERNAL GRID POWER
-    #         if abs(ex_pgen) < 1e-3:                                                                 # IF EXTERNAL GRID POWER IS NEAR ZERO..
-    #             break                                                                               # BREAK AND GET NEXT GEN OUTAGE
-    #         delta += ex_pgen / pfactor_total                                                        # INCREMENT DELTA
-    #         step += 1                                                                               # INCREMENT ITERATION
-    #
-    #     line_loading = max(net_a.res_line['loading_percent'].values)                                # GET MAX LINE LOADING
-    #     xfmr_loading = max(net_a.res_trafo['loading_percent'].values)                               # GET MAX LINE LOADING
-    #     max_loading = max(line_loading, xfmr_loading)                                               # GET MAX OF MAXs
-    #     ex_pgen = net.res_ext_grid.loc[ext_grid_idx, 'p_mw']                                        # GET EXTERNAL GRID REAL POWER
-    #     ex_qgen = net.res_ext_grid.loc[ext_grid_idx, 'q_mvar']                                      # GET EXTERNAL GRID REACTIVE POWER
-    #     print('{0:4s} {1:9s} {2:7s}. . . . . . . . . . . . . . . . . . . . . . . '.format(btext, branchkey, str(outage_areas)),
-    #           '\u0394 =', round(delta, 4), '(' + str(step) + ')', round(ex_pgen, 6), round(ex_qgen, 6), round(max_loading, 1))
-    #
-    #     if step == 120:
-    #         print(branchkey, '>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>', participating_units, ex_pgen0)
-    #         no_margin.append(branchkey)
-    #         for gkey in participating_units:
-    #             gidx = gen_dict[gkey]
-    #             print(net.res_gen.loc[gidx, 'p_mw'], net.gen.loc[gidx, 'max_p_mw'])
-    #
-    # print(no_margin)
-
-
-    #
-    #     # ---------------------------------------------------------------------------------------------
-    #     # -- WRITE BRANCH CONTINGENCY BUS AND GENERATOR RESULTS TO FILE -------------------------------
-    #     # ---------------------------------------------------------------------------------------------
-    #     bus_results = copy.deepcopy(net.res_bus)                                                        # GET CONTINGENCY BUS RESULTS
-    #     gen_results = copy.deepcopy(net.res_gen)                                                        # GET CONTINGENCY GENERATOR RESULTS
-    #     write_bus_results(outfname2, bus_results, fx_data, swshidx_dict, gen_results, ext_grid_idx, conlabel)    # WRITE SOLUTION2 BUS RESULTS
-    #     write_gen_results(outfname2, gen_results, Gids, genbuses, delta, swshidxs)                      # WRITE SOLUTION2 GENERATOR RESULTS
-    # print('DELTAS FOR LINE AND XFMR OUTAGES ESTIMATED .........................', round(time.time() - bdelta_starttime, 3))
-    # print()
