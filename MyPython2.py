@@ -2,6 +2,8 @@ import sys
 import os
 import julia
 
+julia.install()
+
 cwd = os.path.dirname(__file__)
 print()
 
