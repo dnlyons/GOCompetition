@@ -1,32 +1,21 @@
 #!/usr/bin/env julia
 
-using Distributed
-using SparseArrays
-using JSON
-using JuMP
-using Ipopt
-using InfrastructureModels
-using PowerModels
-using Memento
-@everywhere using Pkg
-@everywhere Pkg.activate(".")
-
 # -- IDENTIFY CPU THREADS --------------------------------------------------------------------------
+using Distributed
 max_threads = 12
 if Distributed.nprocs() <= 2
     threads = min(trunc(Int, Sys.CPU_THREADS*0.75), max_threads)
-    println("threads: $(threads)/$(Sys.CPU_THREADS)")
     proc_ids = Distributed.addprocs(threads)
-    println("process ids: $(proc_ids)")
+    println("Threads = $(threads) of $(Sys.CPU_THREADS)")
+    println("Process IDs = $(proc_ids)")
 end
 
 # -- WARM UP FOR MULTIPROCESSING -------------------------------------------------------------------
 using Pkg
 Pkg.activate(".")
+time_start = time()
 # Pkg.instantiate()
 # Pkg.status()
-time_start = time()
-println("start pre-compilation")
 using Distributed
 using SparseArrays
 using JSON
@@ -35,23 +24,20 @@ using Ipopt
 using InfrastructureModels
 using PowerModels
 using Memento
-println("pre-compilation finished ($(time() - time_start))")
 
 @everywhere using Ipopt
-# include("solution2-solver.jl")
-# include("parsers.jl")
-# include("lib.jl")
+@everywhere using Pkg
+@everywhere Pkg.activate(".")
+println("Pre-Compilation Finished ($(time() - time_start))")
 
-# -- CODE2 SOLVER FUNTIONS -------------------------------------------------------------------------
-function compute_solution2(con_file::String, inl_file::String, raw_file::String, rop_file::String, time_limit::Int, scoring_method::Int, network_model::String; output_dir::String="", scenario_id::String="none")
+# -- CODE2 SOLVER FUNCTIONS ------------------------------------------------------------------------
+function compute_solution2(con_file::String, inl_file::String, raw_file::String, rop_file::String; output_dir::String="")
     time_data_start = time()
-    goc_data = parse_goc_files(con_file, inl_file, raw_file, rop_file, scenario_id=scenario_id)
+    goc_data = parse_goc_files(con_file, inl_file, raw_file, rop_file)
     network = build_pm_model(goc_data)
     sol = read_solution1(network, output_dir=output_dir)
     PowerModels.update_data!(network, sol)
-
     check_network_solution(network)
-
     network_tmp = deepcopy(network)
     balance = compute_power_balance_deltas!(network_tmp)
 
@@ -81,7 +67,6 @@ function compute_solution2(con_file::String, inl_file::String, raw_file::String,
 
 
     ###### Prepare Solution 2 ######
-
     time_contingencies_start = time()
 
     gen_cont_total = length(network["gen_contingencies"])
@@ -133,7 +118,6 @@ end
         bus["vm_start"] = bus["vm"]
         bus["va_start"] = bus["va"]
         bus["vm_fixed"] = length(bus_gens[i]) != 0
-
     end
 
     for (i,gen) in network["gen"]
@@ -193,15 +177,11 @@ end
 @everywhere using PowerModels
 
 ##### Generic Helper Functions #####
-
 function remove_comment(string)
     return split(string, "/")[1]
 end
 
-
-
 ##### GOC Initialization File Parser (.ini) #####
-
 function parse_goc_files(ini_file; scenario_id="")
     files, scenario_id = find_goc_files(ini_file, scenario_id=scenario_id)
     return parse_goc_files(files["con"], files["inl"], files["raw"], files["rop"], ini_file=ini_file, scenario_id=scenario_id)
@@ -222,7 +202,6 @@ function find_goc_files(ini_file; scenario_id="")
     open(ini_file) do io
         for line in readlines(io)
             line = strip(line)
-            #println(line)
             if startswith(line, "[INPUTS]")
                 # do nothing
             elseif startswith(line, "ROP")
@@ -239,14 +218,9 @@ function find_goc_files(ini_file; scenario_id="")
         end
     end
 
-    #println(files)
-
     ini_dir = dirname(ini_file)
-
-    #println(ini_dir)
     scenario_dirs = [file for file in readdir(ini_dir) if isdir(joinpath(ini_dir, file))]
     scenario_dirs = sort(scenario_dirs)
-    #println(scenario_dirs)
 
     if length(scenario_id) == 0
         scenario_id = scenario_dirs[1]
@@ -288,8 +262,6 @@ function parse_goc_files(con_file, inl_file, raw_file, rop_file; ini_file="", sc
     info(LOGGER, "  rop: $(files["rop"])")
     info(LOGGER, "  inl: $(files["inl"])")
     info(LOGGER, "  con: $(files["con"])")
-
-    info(LOGGER, "skipping power models data warnings")
     setlevel!(getlogger(PowerModels), "error")
     network_model = PowerModels.parse_file(files["raw"], import_all=true)
     setlevel!(getlogger(PowerModels), "info")
@@ -328,14 +300,10 @@ function parse_goc_opf_files(ini_file; scenario_id="")
         end
     end
 
-    #println(files)
-
     ini_dir = dirname(ini_file)
 
-    #println(ini_dir)
     scenario_dirs = [file for file in readdir(ini_dir) if isdir(joinpath(ini_dir, file))]
     scenario_dirs = sort(scenario_dirs)
-    #println(scenario_dirs)
 
     if length(scenario_id) == 0
         scenario_id = scenario_dirs[1]
@@ -371,7 +339,6 @@ end
 
 
 ##### Unit Inertia and Governor Response Data File Parser (.inl) #####
-
 function parse_inl_file(file::String)
     open(file) do io
         return parse_inl_file(io)
@@ -381,8 +348,6 @@ end
 function parse_inl_file(io::IO)
     inl_list = []
     for line in readlines(io)
-        #line = remove_comment(line)
-
         if startswith(strip(line), "0")
             debug(LOGGER, "inl file sentinel found")
             break
@@ -402,17 +367,12 @@ function parse_inl_file(io::IO)
 
         @assert inl_data["r"] >= 0.0
 
-        #println(inl_data)
         push!(inl_list, inl_data)
     end
     return inl_list
 end
 
-
-
-
 ##### Generator Cost Data File Parser (.rop) #####
-
 rop_sections = [
     "mod" => "Modification Code",
     "bus_vm" => "Bus Voltage Attributes",
@@ -450,7 +410,6 @@ function parse_rop_file(io::IO)
     line_idx = 1
     lines = readlines(io)
     while line_idx < length(lines)
-        #line = remove_comment(lines[line_idx])
         line = lines[line_idx]
         if startswith(strip(line), "0")
             debug(LOGGER, "finished reading rop section $(active_section.second) with $(length(section_data[active_section.first])) items")
@@ -477,8 +436,7 @@ function parse_rop_file(io::IO)
             @assert num_pwl_lines > 0
 
             pwl_point_lines = lines[line_idx+1:line_idx+num_pwl_lines]
-            #pwl_point_lines = remove_comment.(pwl_point_lines)
-            push!(section_data[active_section.first], _parse_rop_pwl(pwl_line_parts, pwl_point_lines))
+           push!(section_data[active_section.first], _parse_rop_pwl(pwl_line_parts, pwl_point_lines))
             line_idx += num_pwl_lines
         else
             info(LOGGER, "skipping data line: $(line)")
@@ -550,9 +508,6 @@ function _parse_rop_pwl(pwl_parts, point_lines)
 end
 
 
-
-
-
 ##### Contingency Description Data File (.con) #####
 
 # OPEN BRANCH FROM BUS *I TO BUS *J CIRCUIT *1CKT
@@ -569,21 +524,6 @@ branch_contigency_structure = [
     #10 => "CKT"
 ]
 
-#=
-# OPEN BRANCH FROM BUS *I TO BUS *J CIRCUIT *1CKT
-branch_contigency_structure_alt = [
-    1 => "OPEN",
-    2 => "BRANCH",
-    3 => "FROM",
-    4 => "BUS",
-    #5 => "I",
-    6 => "TO",
-    7 => "BUS",
-    #8 => "J",
-    9 => "CKT",
-    #10 => "CKT"
-]
-=#
 
 # REMOVE UNIT *ID FROM BUS *I
 generator_contigency_structure = [
@@ -608,13 +548,9 @@ function parse_con_file(io::IO)
     tokens = []
 
     for line in readlines(io)
-        #line_tokens = split(strip(remove_comment(line)))
         line_tokens = split(strip(line))
-        #println(line_tokens)
         append!(tokens, line_tokens)
     end
-
-    #println(tokens)
 
     token_idx = 1
     while token_idx <= length(tokens)
@@ -624,7 +560,6 @@ function parse_con_file(io::IO)
             break
         elseif token == "CONTINGENCY"
             # start reading contingencies
-
             contingency_name = tokens[token_idx+1]
             debug(LOGGER, "reading contingency $(contingency_name)")
 
@@ -634,12 +569,9 @@ function parse_con_file(io::IO)
 
             if token == "OPEN" # branch contingency case
                 # OPEN BRANCH FROM BUS *I TO BUS *J CIRCUIT *1CKT
-
                 @assert remaining_tokens >= 9
                 branch_tokens = tokens[token_idx:token_idx+9]
-                #println(branch_tokens)
 
-                #if !all(branch_tokens[idx] == val for (idx, val) in branch_contigency_structure) && !all(branch_tokens[idx] == val for (idx, val) in branch_contigency_structure_alt)
                 if any(branch_tokens[idx] != val for (idx, val) in branch_contigency_structure)
                     error(LOGGER, "incorrect branch contingency structure: $(branch_tokens)")
                 end
@@ -666,7 +598,6 @@ function parse_con_file(io::IO)
                 token_idx += 9
             elseif token == "REMOVE"
                 # REMOVE UNIT *ID FROM BUS *I
-
                 @assert remaining_tokens >= 5
                 generator_tokens = tokens[token_idx:token_idx+5]
                 #println(generator_tokens)
@@ -711,8 +642,6 @@ function parse_con_file(io::IO)
 
     return con_lists
 end
-
-
 
 
 function parse_solution1_file(file::String)
@@ -774,22 +703,13 @@ function parse_solution1_file(io::IO)
 end
 
 
-
-
-
 # -- LIBRARY FUNCTIONS -----------------------------------------------------------------------------
 @everywhere using JuMP
-
 @everywhere using PowerModels
-
 @everywhere using InfrastructureModels
-
 @everywhere using Memento
-
 @everywhere const LOGGER = getlogger("GOC")
-
 @everywhere const vm_eq_tol = 1e-4
-
 import Statistics: mean
 
 
@@ -812,10 +732,7 @@ function build_pm_model(goc_data)
         branch_lookup[branch_id] = branch
     end
 
-
-
     ##### Link Generator Cost Data #####
-
     @assert network["per_unit"]
     mva_base = network["baseMVA"]
 
@@ -858,9 +775,7 @@ function build_pm_model(goc_data)
     end
 
 
-
     ##### Link Generator Participation Data #####
-
     if length(goc_data.response) != length(network["gen"])
         error(LOGGER, "generator response model data missing, network has $(length(network["gen"])) generators, the response model has $(length(goc_data.response)) generators")
     end
@@ -874,9 +789,7 @@ function build_pm_model(goc_data)
     end
 
 
-
     ##### Flexible Shunt Data #####
-
     for (i,shunt) in network["shunt"]
         if shunt["source_id"][1] == "switched shunt"
             @assert shunt["source_id"][3] == 0
@@ -899,13 +812,9 @@ function build_pm_model(goc_data)
         end
     end
 
-
-
     ##### Add Contingency Lists #####
-
     generator_ids = []
     branch_ids = []
-
     for (i,cont) in enumerate(goc_data.contingencies)
         if cont["component"] == "branch"
             branch_id = (cont["i"], cont["j"], cont["ckt"])
@@ -924,16 +833,11 @@ function build_pm_model(goc_data)
 
     network["branch_contingencies"] = branch_ids
     network["gen_contingencies"] = generator_ids
-
     network["branch_contingencies_active"] = []
     network["gen_contingencies_active"] = []
 
-
-
     ##### Fix Broken Data #####
-
     PowerModels.correct_cost_functions!(network)
-
     for (i,shunt) in network["shunt"]
         # test checks if a "switched shunt" in the orginal data model
         if shunt["dispatchable"]
@@ -957,9 +861,7 @@ function build_pm_opf_model(goc_data)
     network = goc_data.network
 
     ##### General Helpers #####
-
     gen_lookup = Dict(tuple(gen["source_id"][2], strip(gen["source_id"][3])) => gen for (i,gen) in network["gen"])
-
     branch_lookup = Dict()
     for (i,branch) in network["branch"]
         if !branch["transformer"]
@@ -972,10 +874,7 @@ function build_pm_opf_model(goc_data)
         branch_lookup[branch_id] = branch
     end
 
-
-
     ##### Link Generator Cost Data #####
-
     @assert network["per_unit"]
     mva_base = network["baseMVA"]
 
@@ -1007,8 +906,6 @@ function build_pm_opf_model(goc_data)
         pm_gen["model"] = 1
         pm_gen["model_lable"] = cost_model["label"]
         pm_gen["ncost"] = length(cost_model["points"])
-
-        #println(cost_model["points"])
         point_list = Float64[]
         for point in cost_model["points"]
             push!(point_list, point.x/mva_base)
@@ -1016,9 +913,7 @@ function build_pm_opf_model(goc_data)
         end
         pm_gen["cost"] = point_list
     end
-
     PowerModels.correct_cost_functions!(network)
-
     return network
 end
 
@@ -1055,7 +950,6 @@ function build_pm_solution(network, goc_sol)
     end
 
     base_mva = network["baseMVA"]
-
     bus_data = Dict{String,Any}()
     shunt_data = Dict{String,Any}()
     for bus_sol in goc_sol.bus
@@ -1105,17 +999,13 @@ end
     return bus_gens
 end
 
-
-
 @everywhere function run_fixpoint_pf_v2_2!(network, pg_lost, model_constructor, solver; iteration_limit=typemax(Int64))
     time_start = time()
 
     delta = apply_pg_response!(network, pg_lost)
-    #delta = 0.0
-
-    info(LOGGER, "pg lost: $(pg_lost)")
-    info(LOGGER, "delta: $(network["delta"])")
-    info(LOGGER, "pre-solve time: $(time() - time_start)")
+        info(LOGGER, "pg lost: $(pg_lost)")
+        info(LOGGER, "delta: $(network["delta"])")
+        info(LOGGER, "pre-solve time: $(time() - time_start)")
 
     base_solution = extract_solution(network)
     base_solution["delta"] = delta
@@ -1126,7 +1016,6 @@ end
 
     bus_gens = gens_by_bus(network)
 
-    #network["delta_start"] = network["delta"]
     for (i,gen) in network["gen"]
         gen["qg_fixed"] = false
         gen["pg_start"] = gen["pg"]
@@ -1139,15 +1028,13 @@ end
         else
             bus["vm_fixed"] = true
         end
-        #bus["vm_start"] = bus["vm"]
-        #bus["va_start"] = bus["va"]
         bus["vr_start"] = bus["vm"]*cos(bus["va"])
         bus["vi_start"] = bus["vm"]*sin(bus["va"])
     end
 
     time_start = time()
     result = run_fixed_pf_nbf_rect2(network, model_constructor, solver)
-    info(LOGGER, "pf solve time: $(time() - time_start)")
+        info(LOGGER, "pf solve time: $(time() - time_start)")
     if result["termination_status"] == LOCALLY_SOLVED || result["termination_status"] == ALMOST_LOCALLY_SOLVED
         correct_qg!(network, result["solution"], bus_gens=bus_gens)
         PowerModels.update_data!(network, result["solution"])
@@ -1156,11 +1043,6 @@ end
         warn(LOGGER, "contingency pf solver FAILED with status $(result["termination_status"]) on iteration 0")
         return final_result
     end
-
-
-
-
-
 
     pg_switched = true
     qg_switched = true
@@ -1177,25 +1059,21 @@ end
 
         for (i,gen) in network["gen"]
             pg = gen["pg_base"] + network["delta"]*gen["alpha"]
-
             if gen["pg_fixed"]
                 if !isapprox(gen["pmax"], gen["pmin"]) && pg < gen["pmax"] && pg > gen["pmin"]
                     gen["pg"] = pg
                     gen["pg_fixed"] = false
                     pg_switched = true
-                    #info(LOGGER, "unfix pg on gen $(i)")
                 end
             else
                 if pg >= gen["pmax"]
                     gen["pg"] = gen["pmax"]
                     gen["pg_fixed"] = true
                     pg_switched = true
-                    #info(LOGGER, "fix pg to ub on gen $(i)")
                 elseif gen["pg"] <= gen["pmin"]
                     gen["pg"] = gen["pmin"]
                     gen["pg_fixed"] = true
                     pg_switched = true
-                    #info(LOGGER, "fix pg to lb on gen $(i)")
                 end
             end
         end
@@ -1214,7 +1092,6 @@ end
                             gen["qg"] = gen["qmax"]
                             gen["qg_fixed"] = true
                         end
-                        #info(LOGGER, "fix qg to ub on bus $(i)")
                     end
 
                     if qg <= qmin
@@ -1224,7 +1101,6 @@ end
                             gen["qg"] = gen["qmin"]
                             gen["qg_fixed"] = true
                         end
-                        #info(LOGGER, "fix qg to lb on bus $(i)")
                     end
                 else
                     if qg < qmax && qg > qmin
@@ -1235,7 +1111,6 @@ end
                             gen["qg_fixed"] = false
                             gen["qg_start"] = gen["qg"]
                         end
-                        #info(LOGGER, "fix vm to on bus $(i)")
                     end
                     if qg >= qmax && bus["vm"] > bus["vm_base"]
                         bus["vm_fixed"] = true
@@ -1243,7 +1118,6 @@ end
                         for gen in bus_gens[i]
                             gen["qg_fixed"] = false
                         end
-                        #info(LOGGER, "fix vm to on bus $(i)")
                     end
                     if qg <= qmin && bus["vm"] < bus["vm_base"]
                         bus["vm_fixed"] = true
@@ -1251,7 +1125,6 @@ end
                         for gen in bus_gens[i]
                             gen["qg_fixed"] = false
                         end
-                        #info(LOGGER, "fix vm to on bus $(i)")
                     end
                 end
             end
@@ -1270,10 +1143,10 @@ end
 
 
         if pg_switched || qg_switched || vm_switched
-            info(LOGGER, "bus or gen swtiched: $iteration")
+                info(LOGGER, "bus or gen swtiched: $iteration")
             time_start = time()
             result = run_fixed_pf_nbf_rect2(network, model_constructor, solver)
-            info(LOGGER, "pf solve time: $(time() - time_start)")
+                info(LOGGER, "pf solve time: $(time() - time_start)")
             if result["termination_status"] == LOCALLY_SOLVED || result["termination_status"] == ALMOST_LOCALLY_SOLVED
                 correct_qg!(network, result["solution"], bus_gens=bus_gens)
                 PowerModels.update_data!(network, result["solution"])
@@ -1313,9 +1186,6 @@ end
     end
 
     pg_target = pg_total + pg_delta
-    #info(LOGGER, "total gen:  $(pg_total)")
-    #info(LOGGER, "target gen: $(pg_target)")
-
 
     delta_est = 0.0
     while !isapprox(pg_total, pg_target)
@@ -1325,10 +1195,8 @@ end
                 alpha_total += gen["alpha"]
             end
         end
-        #info(LOGGER, "alpha total: $(alpha_total)")
 
         delta_est += pg_delta/alpha_total
-        #info(LOGGER, "detla: $(delta_est)")
 
         for (i,gen) in network["gen"]
             if gen["gen_status"] != 0
@@ -1338,14 +1206,12 @@ end
                     gen["pg"] = gen["pmin"]
                     if !gen["pg_fixed"]
                         gen["pg_fixed"] = true
-                        #info(LOGGER, "gen $(i) hit lb $(gen["pmin"]) with target value of $(pg_cont)")
                     end
                 elseif pg_cont >= gen["pmax"] && gen["alpha"] > 0
 
                     gen["pg"] = gen["pmax"]
                     if !gen["pg_fixed"]
                         gen["pg_fixed"] = true
-                        #info(LOGGER, "gen $(i) hit ub $(gen["pmax"]) with target value of $(pg_cont)")
                     end
                 else
                     gen["pg"] = pg_cont
@@ -1359,14 +1225,8 @@ end
                 pg_total += gen["pg"]
             end
         end
-        #pg_comp = comp_pg_response_total(network, delta_est)
-        #info(LOGGER, "detla: $(delta_est)")
-        #info(LOGGER, "total gen comp $(pg_comp) - gen inc $(pg_total)")
-        #info(LOGGER, "total gen $(pg_total) - target gen $(pg_target)")
-
         pg_delta = pg_target - pg_total
     end
-
     network["delta"] = delta_est
     return delta_est
 end
@@ -1374,7 +1234,6 @@ end
 
 @everywhere function extract_solution(network; branch_flow=false)
     sol = Dict{String,Any}()
-
     sol["bus"] = Dict{String,Any}()
     for (i,bus) in network["bus"]
         bus_dict = Dict{String,Any}()
@@ -1429,23 +1288,13 @@ end
     PowerModels.variable_voltage(pm, bounded=false)
     PowerModels.variable_active_generation(pm, bounded=false)
     PowerModels.variable_reactive_generation(pm, bounded=false)
-    #PowerModels.variable_branch_flow(pm, bounded=false)
-    #PowerModels.variable_dcline_flow(pm, bounded=false)
-
-    #PowerModels.variable_branch_flow(pm, bounded=false)
-
     # TODO set bounds bounds on alpha and total gen capacity
     var(pm)[:delta] = @variable(pm.model, delta, base_name="delta", start=0.0)
-    #var(pm)[:delta] = @variable(pm.model, delta, base_name="delta", start=ref(pm, :delta_start))
-    #Memento.info(LOGGER, "post variable time: $(time() - start_time)")
 
     start_time = time()
-
     vr = var(pm, :vr)
     vi = var(pm, :vi)
-
     PowerModels.constraint_model_voltage(pm)
-
     for (i,bus) in ref(pm, :bus)
         if bus["vm_fixed"]
             @constraint(pm.model, vr[i]^2 + vi[i]^2 == bus["vm_base"]^2)
@@ -1455,16 +1304,11 @@ end
     for i in ids(pm, :ref_buses)
         PowerModels.constraint_theta_ref(pm, i)
     end
-    #Memento.info(LOGGER, "misc constraints time: $(time() - start_time)")
-
 
     start_time = time()
     p = Dict{Tuple{Int64,Int64,Int64},GenericQuadExpr{Float64,VariableRef}}()
     q = Dict{Tuple{Int64,Int64,Int64},GenericQuadExpr{Float64,VariableRef}}()
     for (i,branch) in ref(pm, :branch)
-        #PowerModels.constraint_ohms_yt_from(pm, i)
-        #PowerModels.constraint_ohms_yt_to(pm, i)
-
         f_bus_id = branch["f_bus"]
         t_bus_id = branch["t_bus"]
         f_idx = (i, f_bus_id, t_bus_id)
@@ -1473,8 +1317,6 @@ end
         f_bus = ref(pm, :bus, f_bus_id)
         t_bus = ref(pm, :bus, t_bus_id)
 
-        #g, b = PowerModels.calc_branch_y(branch)
-        #tr, ti = PowerModels.calc_branch_t(branch)
         g = branch["g"]
         b = branch["b"]
         tr = branch["tr"]
@@ -1486,10 +1328,6 @@ end
         b_to = branch["b_to"]
         tm = branch["tap"]
 
-        #p_fr  = var(pm, :p, f_idx)
-        #q_fr  = var(pm, :q, f_idx)
-        #p_to  = var(pm, :p, t_idx)
-        #q_to  = var(pm, :q, t_idx)
         vr_fr = vr[f_bus_id] #var(pm, :vr, f_bus_id)
         vr_to = vr[t_bus_id] #var(pm, :vr, t_bus_id)
         vi_fr = vi[f_bus_id] #var(pm, :vi, f_bus_id)
@@ -1500,7 +1338,6 @@ end
         p[t_idx] = (g+g_to)*(vr_to^2 + vi_to^2) + (-g*tr-b*ti)/tm^2*(vr_fr*vr_to + vi_fr*vi_to) + (-b*tr+g*ti)/tm^2*(-(vi_fr*vr_to - vr_fr*vi_to))
         q[t_idx] = -(b+b_to)*(vr_to^2 + vi_to^2) - (-b*tr+g*ti)/tm^2*(vr_fr*vr_to + vi_fr*vi_to) + (-g*tr-b*ti)/tm^2*(-(vi_fr*vr_to - vr_fr*vi_to))
     end
-    #Memento.info(LOGGER, "flow expr time: $(time() - start_time)")
 
 
     start_time = time()
@@ -1522,13 +1359,9 @@ end
             qg[i] = var(pm, :qg, i)
         end
     end
-    #Memento.info(LOGGER, "gen expr time: $(time() - start_time)")
-
 
     start_time = time()
     for (i,bus) in ref(pm, :bus)
-        #PowerModels.constraint_kcl_shunt(pm, i)
-
         bus_arcs = ref(pm, :bus_arcs, i)
         bus_arcs_dc = ref(pm, :bus_arcs_dc, i)
         bus_gens = ref(pm, :bus_gens, i)
@@ -1541,43 +1374,21 @@ end
         bus_gs = Dict(k => ref(pm, :shunt, k, "gs") for k in bus_shunts)
         bus_bs = Dict(k => ref(pm, :shunt, k, "bs") for k in bus_shunts)
 
-        #p = var(pm, :p)
-        #q = var(pm, :q)
-        #pg = var(pm, :pg)
-        #qg = var(pm, :qg)
-
         @constraint(pm.model, sum(p[a] for a in bus_arcs) == sum(pg[g] for g in bus_gens) - sum(pd for pd in values(bus_pd)) - sum(gs for gs in values(bus_gs))*(vr[i]^2 + vi[i]^2))
         @constraint(pm.model, sum(q[a] for a in bus_arcs) == sum(qg[g] for g in bus_gens) - sum(qd for qd in values(bus_qd)) + sum(bs for bs in values(bus_bs))*(vr[i]^2 + vi[i]^2))
     end
-    #Memento.info(LOGGER, "power balance constraint time: $(time() - start_time)")
-
 end
 
 
 ""
 
 @everywhere function solution_second_stage!(pm::GenericPowerModel, sol::Dict{String,Any})
-    #start_time = time()
     PowerModels.add_setpoint_bus_voltage!(sol, pm)
-    #Memento.info(LOGGER, "voltage solution time: $(time() - start_time)")
-
-    #start_time = time()
     PowerModels.add_setpoint_generator_power!(sol, pm)
-    #Memento.info(LOGGER, "generator solution time: $(time() - start_time)")
-
-    #start_time = time()
     PowerModels.add_setpoint_branch_flow!(sol, pm)
-    #Memento.info(LOGGER, "branch solution time: $(time() - start_time)")
-
     sol["delta"] = JuMP.value(var(pm, :delta))
-
-    #start_time = time()
     PowerModels.add_setpoint_fixed!(sol, pm, "shunt", "bs", default_value = (item) -> item["bs"])
-    #Memento.info(LOGGER, "shunt solution time: $(time() - start_time)")
-
-    #PowerModels.print_summary(sol)
 end
-
 
 "fixes solution degeneracy issues when qg is a free variable, as is the case in PowerFlow"
 
@@ -1587,7 +1398,6 @@ end
             gen_ids = [gen["index"] for gen in gens]
             qgs = [solution["gen"]["$(j)"]["qg"] for j in gen_ids]
             if !isapprox(abs(sum(qgs)), sum(abs.(qgs)))
-                #info(LOGGER, "$(i) - $(gen_ids) - $(qgs) - output requires correction!")
                 qg_total = sum(qgs)
 
                 qg_remaining = sum(qgs)
@@ -1602,16 +1412,12 @@ end
                         qg_assignment[gen["index"]] = gen_qg + qg_remaining
                     end
                 end
-                #info(LOGGER, "$(qg_assignment)")
                 for (j,qg) in qg_assignment
                     solution["gen"]["$(j)"]["qg"] = qg
                 end
 
                 sol_qg_total = sum(solution["gen"]["$(j)"]["qg"] for j in gen_ids)
-                #info(LOGGER, "$(qg_total) - $(sol_qg_total)")
                 @assert isapprox(qg_total, sol_qg_total)
-
-                #info(LOGGER, "updated to $([solution["gen"]["$(j)"]["qg"] for j in gen_ids])")
             end
         end
     end
@@ -1642,17 +1448,13 @@ function correct_contingency_solutions!(network, contingency_solutions)
 
                     if !isapprox(abs(qmin - qmax), 0.0)
                         if qg >= qmax && bus["vm"] > nw_bus["vm"]
-                            #println(qmin, " ", qg, " ", qmax)
-                            #warn(LOGGER, "update qg $(qmin) $(qg) $(qmax)")
-                            warn(LOGGER, "update vm on bus $(i) in contingency $(label) to match set-point $(bus["vm"]) -> $(nw_bus["vm"]) due to qg upper bound and vm direction")
+                                warn(LOGGER, "update vm on bus $(i) in contingency $(label) to match set-point $(bus["vm"]) -> $(nw_bus["vm"]) due to qg upper bound and vm direction")
                             push!(vm_changes, abs(bus["vm"] - nw_bus["vm"]))
                             bus["vm"] = nw_bus["vm"]
                         end
 
                         if qg <= qmin && bus["vm"] < nw_bus["vm"]
-                            #println(qmin, " ", qg, " ", qmax)
-                            #warn(LOGGER, "update qg $(qmin) $(qg) $(qmax)")
-                            warn(LOGGER, "update vm on bus $(i) in contingency $(label) to match set-point $(bus["vm"]) -> $(nw_bus["vm"]) due to qg lower bound and vm direction")
+                                warn(LOGGER, "update vm on bus $(i) in contingency $(label) to match set-point $(bus["vm"]) -> $(nw_bus["vm"]) due to qg lower bound and vm direction")
                             push!(vm_changes, abs(bus["vm"] - nw_bus["vm"]))
                             bus["vm"] = nw_bus["vm"]
                         end
@@ -1660,13 +1462,13 @@ function correct_contingency_solutions!(network, contingency_solutions)
                 end
 
                 if bus["vm"] > nw_bus["vmax"]
-                    warn(LOGGER, "update vm on bus $(i) in contingency $(label) to match ub $(bus["vm"]) -> $(nw_bus["vmax"]) due to out of bounds")
+                        warn(LOGGER, "update vm on bus $(i) in contingency $(label) to match upper-bound $(bus["vm"]) -> $(nw_bus["vmax"]) due to out of bounds")
                     push!(vm_changes, bus["vm"] - nw_bus["vmax"])
                     bus["vm"] = nw_bus["vmax"]
                 end
 
                 if bus["vm"] < nw_bus["vmin"]
-                    warn(LOGGER, "update vm on bus $(i) in contingency $(label) to match lb $(bus["vm"]) -> $(nw_bus["vmin"]) due to out of bounds")
+                        warn(LOGGER, "update vm on bus $(i) in contingency $(label) to match lower-bound $(bus["vm"]) -> $(nw_bus["vmin"]) due to out of bounds")
                     push!(vm_changes, nw_bus["vmin"] - bus["vm"])
                     bus["vm"] = nw_bus["vmin"]
                 end
@@ -1676,7 +1478,6 @@ function correct_contingency_solutions!(network, contingency_solutions)
             end
         end
 
-
         bs_changes = [0.0]
         for (i,shunt) in cont_sol["shunt"]
             nw_shunt = network["shunt"][i]
@@ -1684,12 +1485,12 @@ function correct_contingency_solutions!(network, contingency_solutions)
                 @assert nw_shunt["gs"] == 0.0
                 @assert haskey(nw_shunt, "bmin") && haskey(nw_shunt, "bmax")
                 if shunt["bs"] > nw_shunt["bmax"]
-                    warn(LOGGER, "update bs on shunt $(i) in contingency $(label) to be in bounds $(shunt["bs"]) -> $(nw_shunt["bmax"])")
+                        warn(LOGGER, "update bs on shunt $(i) in contingency $(label) to be in bounds $(shunt["bs"]) -> $(nw_shunt["bmax"])")
                     push!(bs_changes, shunt["bs"] - nw_shunt["bmax"])
                     shunt["bs"] = nw_shunt["bmax"]
                 end
                 if shunt["bs"] < nw_shunt["bmin"]
-                    warn(LOGGER, "update bs on shunt $(i) in contingency $(label) to be in bounds $(shunt["bs"]) -> $(nw_shunt["bmin"])")
+                        warn(LOGGER, "update bs on shunt $(i) in contingency $(label) to be in bounds $(shunt["bs"]) -> $(nw_shunt["bmin"])")
                     push!(bs_changes, nw_shunt["bmin"] - shunt["bs"])
                     shunt["bs"] = nw_shunt["bmin"]
                 end
@@ -1713,10 +1514,8 @@ function correct_contingency_solutions!(network, contingency_solutions)
 
                 if gen["qg"] < nw_gen["qmax"] && gen["qg"] > nw_gen["qmin"]
                     bus = cont_sol["bus"]["$(bus_id)"]
-                    #if !isapprox(bus["vm"], nw_bus["vm"])
                     if !isapprox(bus["vm"], nw_bus["vm"], atol=vm_eq_tol/2)
-                        #debug(LOGGER, "bus $(bus_id) : vm_base $(nw_bus["vm"]) - vm $(bus["vm"]) : reactive bounds $(nw_gen["qmin"]) - $(gen["qg"]) - $(nw_gen["qmax"])")
-                        warn(LOGGER, "update vm on bus $(bus_id) in contingency $(label) to match base case $(bus["vm"]) -> $(nw_bus["vm"]) due to within reactive bounds")
+                            warn(LOGGER, "update vm on bus $(bus_id) in contingency $(label) to match base case $(bus["vm"]) -> $(nw_bus["vm"]) due to within reactive bounds")
                     end
                     bus["vm"] = nw_bus["vm"]
                 end
@@ -1726,29 +1525,28 @@ function correct_contingency_solutions!(network, contingency_solutions)
                 pg_calc = min(pg_calc, nw_gen["pmax"])
 
                 if !isapprox(gen["pg"], pg_calc, atol=1e-5)
-                    warn(LOGGER, "pg value on gen $(i) $(nw_gen["source_id"]) in contingency $(label) is not consistent with the computed value given:$(gen["pg"]) calc:$(pg_calc)")
+                        warn(LOGGER, "pg value on gen $(i) $(nw_gen["source_id"]) in contingency $(label) is not consistent with the computed value given:$(gen["pg"]) calc:$(pg_calc)")
                 end
-
                 if gen["pg"] > nw_gen["pmax"]
-                    warn(LOGGER, "update pg on gen $(i) $(nw_gen["source_id"]) in contingency $(label) to match ub $(gen["pg"]) -> $(nw_gen["pmax"])")
+                        warn(LOGGER, "update pg on gen $(i) $(nw_gen["source_id"]) in contingency $(label) to match upper-bound $(gen["pg"]) -> $(nw_gen["pmax"])")
                     push!(pg_changes, gen["pg"] - nw_gen["pmax"])
                     gen["pg"] = nw_gen["pmax"]
                 end
 
                 if gen["pg"] < nw_gen["pmin"]
-                    warn(LOGGER, "update pg on gen $(i) $(nw_gen["source_id"]) in contingency $(label) to match lb $(gen["pg"]) -> $(nw_gen["pmin"])")
+                        warn(LOGGER, "update pg on gen $(i) $(nw_gen["source_id"]) in contingency $(label) to match lower-bound $(gen["pg"]) -> $(nw_gen["pmin"])")
                     push!(pg_changes, nw_gen["pmin"] - gen["pg"])
                     gen["pg"] = nw_gen["pmin"]
                 end
 
                 if gen["qg"] > nw_gen["qmax"]
-                    warn(LOGGER, "update qg on gen $(i) $(nw_gen["source_id"]) in contingency $(label) to match ub $(gen["qg"]) -> $(nw_gen["qmax"])")
+                        warn(LOGGER, "update qg on gen $(i) $(nw_gen["source_id"]) in contingency $(label) to match upper-bound $(gen["qg"]) -> $(nw_gen["qmax"])")
                     push!(qg_changes, gen["qg"] - nw_gen["qmax"])
                     gen["qg"] = nw_gen["qmax"]
                 end
 
                 if gen["qg"] < nw_gen["qmin"]
-                    warn(LOGGER, "update qg on gen $(i) $(nw_gen["source_id"]) in contingency $(label) to match lb $(gen["qg"]) -> $(nw_gen["qmin"])")
+                        warn(LOGGER, "update qg on gen $(i) $(nw_gen["source_id"]) in contingency $(label) to match lower-bound $(gen["qg"]) -> $(nw_gen["qmin"])")
                     push!(qg_changes, nw_gen["qmin"] - gen["qg"])
                     gen["qg"] = nw_gen["qmin"]
                 end
@@ -1757,17 +1555,6 @@ function correct_contingency_solutions!(network, contingency_solutions)
                 gen["qg"] = 0.0
             end
         end
-
-        # test imbalance on branch conts after flow corrections
-        #=
-        network_tmp = deepcopy(network)
-        cont_type = cont_sol["cont_type"]
-        cont_idx = cont_sol["cont_comp_id"]
-        network_tmp["branch"]["$(cont_idx)"]["br_status"] = 0
-        PowerModels.update_data!(network_tmp, cont_sol)
-        deltas = compute_power_balance_deltas!(network_tmp)
-        println(deltas)
-        =#
 
         _summary_changes(network, label, vm_changes, bs_changes, pg_changes, qg_changes)
 
@@ -1782,7 +1569,6 @@ function correct_contingency_solutions!(network, contingency_solutions)
         push!(cont_pg_changes_max, maximum(pg_changes))
         push!(cont_qg_changes_max, maximum(qg_changes))
     end
-
 
     println("")
 
@@ -1887,7 +1673,6 @@ function write_solution2(pm_network, contingencies; output_dir="", solution_file
             bus_switched_shunt_b = Dict(i => 0.0 for (i,bus) in pm_network["bus"])
             for (i,nw_shunt) in pm_network["shunt"]
                 if nw_shunt["dispatchable"] && nw_shunt["status"] == 1
-                    #@assert nw_shunt["gs"] == 0.0
                     shunt = cont_solution["shunt"][i]
                     bus_switched_shunt_b["$(nw_shunt["shunt_bus"])"] += shunt["bs"]
                 end
@@ -1978,14 +1763,16 @@ function compute_power_balance_deltas!(network)
 end
 
 # -- CALLING FUNCTION ------------------------------------------------------------------------------
-function Code2_Solver(InFile1::String, InFile2::String, InFile3::String, InFile4::String, TimeLimitInSeconds::Int64, ScoringMethod::Int64, NetworkModel::String)
-    println("running MyJulia2")
-    println("  $(InFile1)")
-    println("  $(InFile2)")
-    println("  $(InFile3)")
-    println("  $(InFile4)")
-    println("  $(TimeLimitInSeconds)")
-    println("  $(ScoringMethod)")
-    println("  $(NetworkModel)")
-    compute_solution2(InFile1, InFile2, InFile3, InFile4, TimeLimitInSeconds, ScoringMethod, NetworkModel)
+# function Code2_Solver(InFile1::String, InFile2::String, InFile3::String, InFile4::String, TimeLimitInSeconds::Int64, ScoringMethod::Int64, NetworkModel::String)
+function Code2_Solver(InFile1::String, InFile2::String, InFile3::String, InFile4::String; output_dir::String="")
+    println("Running Code2_Solver")
+    println("  conFile = $(InFile1)")
+    println("  inlFile = $(InFile2)")
+    println("  rawFile = $(InFile3)")
+    println("  ropFile = $(InFile4)")
+#     println("  $(TimeLimitInSeconds)")
+#     println("  $(ScoringMethod)")
+#     println("  $(NetworkModel)")
+#     compute_solution2(InFile1, InFile2, InFile3, InFile4, TimeLimitInSeconds, ScoringMethod, NetworkModel)
+    compute_solution2(InFile1, InFile2, InFile3, InFile4, output_dir="")
 end

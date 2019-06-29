@@ -4,7 +4,6 @@ import csv
 import math
 import time
 import copy
-import pickle
 import numpy
 import pandapower as pp
 from pandas import options as pdoptions
@@ -22,13 +21,6 @@ if sys.argv[1:]:
     raw_fname = sys.argv[3]
     rop_fname = sys.argv[4]
     outfname1 = 'solution1.txt'
-    outfname2 = 'solution2.txt'
-    # neta_fname = os.path.join('submission', 'neta.p')
-    # netc_fname = os.path.join('submission', 'netc.p')
-    # data_fname = os.path.join('submission', 'netdata.pkl')
-    # neta_fname = os.path.abspath('..') + r'/neta.p'
-    # netc_fname = os.path.abspath('..') + r'/netc.p'
-    # data_fname = os.path.abspath('..') + r'/netdata.pkl'
 
 # -----------------------------------------------------------------------------
 # -- DEVELOPMENT --- DEVELOPMENT --- DEVELOPMENT --- DEVELOPMENT --------------
@@ -39,9 +31,6 @@ if not sys.argv[1:]:
     raw_fname = cwd + r'/Network_01R-10/scenario_1/case.raw'
     rop_fname = cwd + r'/Network_01R-10/case.rop'
     outfname1 = cwd + r'/solution1.txt'
-    # neta_fname = cwd + r'/Network_01R-10/scenario_1/neta.p'
-    # netc_fname = cwd + r'/Network_01R-10/scenario_1/netc.p'
-    # data_fname = cwd + r'/Network_01R-10/scenario_1/netdata.pkl'
 
     try:
         os.remove(outfname1)
@@ -1421,21 +1410,6 @@ if __name__ == "__main__":
     gen_results = copy.deepcopy(net_a.res_gen)                                                      # GET BASECASE GENERATOR RESULTS
     write_base_bus_results(outfname1, bus_results, swshidx_dict, gen_results, ext_grid_idx)         # WRITE SOLUTION1 BUS RESULTS
     write_base_gen_results(outfname1, gen_results, Gids, genbuses, swshidxs)                        # WRITE SOLUTION1 GEN RESULTS
-
-    # =============================================================================================
-    # -- WRITE MISC DATA TO FILE (READ IN MYPYTHON2) ----------------------------------------------
-    # =============================================================================================
-    # write_starttime = time.time()
-    # pp.to_pickle(net_a, neta_fname)                                                                 # WRITE BASECASE RATEA NETWORK TO FILE
-    # pp.to_pickle(net_c, netc_fname)                                                                 # WRITE CONTINGENCY RATEC NETWORK TO FILE
-    # PFile = open(data_fname, 'wb')                                                                  # OPEN PICKLE FILE
-    # pickle.dump([base_pgens, ext_grid_idx, genbuses, genbus_dict, Gids, line_dict, goutagekeys,
-    #              boutagekeys, outage_dict, gen_dict, pfactor_dict, xfmr_dict, area_swhunts,
-    #              swsh_dict, swshbus_dict, swshidxs, swshidx_dict, busarea_dict, branch_areas,
-    #              area_participating_gens, swinggen_idxs, alt_sw_genkey, tie_idx, alt_tie_idx], PFile)   # WRITE MISC DATA TO PICKLE FILE
-    # PFile.close()                                                                                       # CLOSE PICKLE FILE
-    #
-    # print('WRITING DATA TO FILE -----------------------------------------------', round(time.time() - write_starttime, 3))
 
     print('DONE ---------------------------------------------------------------')
     print('TOTAL TIME -------------------------------------------------------->', round(time.time() - start_time, 3))
