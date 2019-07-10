@@ -1,5 +1,6 @@
 import sys
 import os
+import time
 import julia
 
 cwd = os.path.dirname(__file__)
@@ -48,14 +49,18 @@ if not sys.argv[1:]:
     SFile.write('export GRB_LICENSE_FILE="$GUROBI_811_HOME/license/gurobi_client.lic"\n')
     SFile.close()
 
+start_time = time.time()
 # julia.install()
 cs = julia.Julia()
 C2S = cs.include('Code2_Solver.jl')
 C2S(con_fname, inl_fname, raw_fname, rop_fname, output_dir="")
+print()
+print('SOLUTION2 FILE GENERATED ...............................................', round(time.time() - start_time), 3)
 
 # == DEVELOPEMENT, COPY FILES FOR EVALUATION ------------------------------------------------
 if not sys.argv[1:]:
     import shutil
     dirname = os.path.dirname(__file__)
     shutil.copy(outfname, os.path.join(dirname, 'GitHub_Work'))
+    shutil.copy('submission.conf', os.path.join(dirname, 'GitHub_Work'))
     shutil.copy(os.path.realpath(__file__), os.path.join(dirname, 'GitHub_Work/MyPython2.py'))

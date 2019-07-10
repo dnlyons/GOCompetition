@@ -50,6 +50,7 @@ SWVREG = 0                  # SWING GENERATORS VOLTAGE SCHEDULE ... 0=DEFAULT_GE
 GVREG = 0                   # NON-SWING GENERATORS VOLTAGE SCHEDULES ... 0=DEFAULT_GENV_RAW, 1=CUSTOM(ALL)
 SWSHVREG = 0                # SWITCHED SHUNTS VOLTAGE SCHEDULES ........ 0=DEFAULT_RAW, 1=CUSTOM(ALL)
 MaxLoading = 95.0           # MAXIMUM %BRANCH LOADING FOR N-0 AND N-1
+MaxMinBusVoltageAdj = 0.015
 MaxRunningTime = 600.0
 
 
@@ -177,27 +178,27 @@ def get_swgens_data(swbus, generators):
     return swgens_data
 
 
-def get_alt_swingbus(generators, buses, swbus, sw_kv):
-    """find an alternate swing generator"""
-    # generators = (gen.i, gen.id, gen.pg, gen.qg, gen.qt, gen.qb, gen.vs, gen.pt, gen.pb, gen.stat)
-    # buses = (bus.i, bus.ide, bus.baskv, bus.area, bus.vm, bus.va, bus.nvhi, bus.nvlo, bus.evhi, bus.evlo)
-    max_pmargin_list = [[g.pt - g.pg, g.i, str(g.i) + '-' + g.id, 0.0] for g in generators.values() if g.i != swbus and g.stat != 0]
-    max_pmargin_list.sort(reverse=True)
-    for g in range(len(max_pmargin_list)):                                                          # loop across indexes of the pmargin lists
-        g_bus = max_pmargin_list[g][1]                                                              # get the generator busnumber from this list
-        count_gens = 0                                                                              # initialize generator counter (to insure only one generator on the bus)
-        for gg in max_pmargin_list:                                                                 # loop through the pmargin lists
-            if gg[1] == g_bus:                                                                      # if this list has this genbus in it...
-                count_gens += 1                                                                     # increment the gen counter
-        if count_gens == 1:                                                                         # if only one generator on the bus....
-            for bus in buses.values():                                                              # loop across the bus objects
-                if bus.i == g_bus:                                                                  # if the busnumber = this generator bus...
-                    max_pmargin_list[g][3] = bus.baskv                                              # change the fourth element to the buskv (this will remain 0.0 if count != 1)
-    sw_candidates = [g for g in max_pmargin_list if g[3] == sw_kv]                                  # get alternate swing bus candidates with bus kv = original swing bus kv
-    sw_candidates.sort(reverse=True)                                                                # sort largest pmargin to smallest pmargin
-    swbus1 = sw_candidates[0][1]                                                                    # assign alternate swing bus to the top candidate's swing bus
-    swgkey = sw_candidates[0][2]                                                                    # assign alternate swing gen key to the top candidate's gen key
-    return swbus1, swgkey
+# def get_alt_swingbus(generators, buses, swbus, sw_kv):
+#     """find an alternate swing generator"""
+#     # generators = (gen.i, gen.id, gen.pg, gen.qg, gen.qt, gen.qb, gen.vs, gen.pt, gen.pb, gen.stat)
+#     # buses = (bus.i, bus.ide, bus.baskv, bus.area, bus.vm, bus.va, bus.nvhi, bus.nvlo, bus.evhi, bus.evlo)
+#     max_pmargin_list = [[g.pt - g.pg, g.i, str(g.i) + '-' + g.id, 0.0] for g in generators.values() if g.i != swbus and g.stat != 0]
+#     max_pmargin_list.sort(reverse=True)
+#     for g in range(len(max_pmargin_list)):                                                          # loop across indexes of the pmargin lists
+#         g_bus = max_pmargin_list[g][1]                                                              # get the generator busnumber from this list
+#         count_gens = 0                                                                              # initialize generator counter (to insure only one generator on the bus)
+#         for gg in max_pmargin_list:                                                                 # loop through the pmargin lists
+#             if gg[1] == g_bus:                                                                      # if this list has this genbus in it...
+#                 count_gens += 1                                                                     # increment the gen counter
+#         if count_gens == 1:                                                                         # if only one generator on the bus....
+#             for bus in buses.values():                                                              # loop across the bus objects
+#                 if bus.i == g_bus:                                                                  # if the busnumber = this generator bus...
+#                     max_pmargin_list[g][3] = bus.baskv                                              # change the fourth element to the buskv (this will remain 0.0 if count != 1)
+#     sw_candidates = [g for g in max_pmargin_list if g[3] == sw_kv]                                  # get alternate swing bus candidates with bus kv = original swing bus kv
+#     sw_candidates.sort(reverse=True)                                                                # sort largest pmargin to smallest pmargin
+#     swbus1 = sw_candidates[0][1]                                                                    # assign alternate swing bus to the top candidate's swing bus
+#     swgkey = sw_candidates[0][2]                                                                    # assign alternate swing gen key to the top candidate's gen key
+#     return swbus1, swgkey
 
 
 def copy_opf_to_network(netx, gendict, genbusdict, swbus, swshdict, swshbusdict):
@@ -227,9 +228,10 @@ def estimate_swing_vreg(netx, nlevelbuses, swingbusidx, swinggenidxs, extgrididx
     return netx
 
 
-def get_dominant_outages(xnet, goutage_keys, boutage_keys, onlinegens, gendict, linedict, xfmrdict, swinggenidxs,
-                         tieidx, alttieidx, altswgenkey, extgrididx, step, lineratedict, xfmrratedict, finalflag):
+def get_dominant_outages(xnet, goutage_keys, boutage_keys, onlinegens, gendict, linedict, xfmrdict, swinggenidxs, iteration, lineratedict, xfmrratedict, finalflag):
     """get dominant outages resulting in branch loading"""
+    nosolves_found = False
+    nosolve_keys = []
     swinggen_in_outages = False
     swinggen_key = ''
     contrained_line_dict = {}                                                                       # initialize dict
@@ -244,17 +246,10 @@ def get_dominant_outages(xnet, goutage_keys, boutage_keys, onlinegens, gendict, 
         if o_key in onlinegens:                                                                     # check if a generator...
             g_idx = gendict[o_key]                                                                  # get generator index
             net.gen.in_service[g_idx] = False                                                       # switch off outaged generator
-            if g_idx in swinggenidxs and len(swinggenidxs) == 1:                                    # check if outage is a swing generator
-                net.line.loc[tieidx, 'in_service'] = False                                          # open swing tie
-                net.line.loc[alttieidx, 'in_service'] = True                                        # close alternate swing tie
-                alt_sw_gidx = gen_dict[altswgenkey]                                                 # get alternate swing generator index
-                alt_swbus = genbus_dict[alt_sw_gidx]                                                # get alternate swingbus index
-                alt_swvreg = net.gen.loc[alt_sw_gidx, 'vm_pu']                                      # get alternate swing generator voltage setpoint
-                alt_swangle = net.res_bus.loc[alt_swbus, 'va_degree']                               # get alternate swingbus angle
-                net.ext_grid.loc[extgrididx, 'vm_pu'] = alt_swvreg                                  # set extgrid voltage setpoint
-                net.ext_grid.loc[extgrididx, 'va_degree'] = alt_swangle                             # set extgrid reference angle
+            if g_idx in swinggenidxs and len(swinggenidxs) == 1 and iteration == 0:                 # check if outage is the only swing generator
                 swinggen_in_outages = True
                 swinggen_key = o_key
+                break
         elif o_key in linedict:                                                                     # check if a line...
             line_idx = linedict[o_key]                                                              # get line index
             net.line.in_service[line_idx] = False                                                   # switch out outaged line
@@ -264,6 +259,8 @@ def get_dominant_outages(xnet, goutage_keys, boutage_keys, onlinegens, gendict, 
         try:                                                                                        # try straight powerflow solution
             pp.runpp(net, enforce_q_lims=True)                                                      # run powerflow
         except:                                                                                     # if no solution...
+            nosolve_keys.append(o_key)
+            nosolves_found = True
             continue                                                                                # get next contingency
         for line_key in linedict:                                                                   # loop across line keys
             line_idx = linedict[line_key]                                                           # get line index
@@ -304,14 +301,18 @@ def get_dominant_outages(xnet, goutage_keys, boutage_keys, onlinegens, gendict, 
     dominantoutages = templist                                                                      # reassign list
     totaloverloading = sum(overloadlist)
     if not finalflag:
-        if swinggen_in_outages:
-            print('DOMINANT OUTAGES{0:d} ({1:d})'.format(step, len(overloadlist)), dominantoutages, overloadlist, '({0:.1f} MVA)'.format(totaloverloading), '.... SWING OUTAGED:', swinggen_key)
+        if swinggen_in_outages and iteration == 0:
+            dominantoutages = [swinggen_key]
+            totaloverloading = 999.9
+            print('DOMINANT OUTAGES{0:d} ({1:d})'.format(iteration, 1), [swinggen_key], '<-- SWING GENERATOR IN OUTAGES... RUN IT FIRST')
+        elif nosolves_found:
+            print('DOMINANT OUTAGES{0:d} ({1:d})'.format(iteration, len(overloadlist)), dominantoutages, overloadlist, '({0:.1f} MVA)'.format(totaloverloading), 'NOSOLVES:', nosolve_keys)
         else:
-            print('DOMINANT OUTAGES{0:d} ({1:d})'.format(step, len(overloadlist)), dominantoutages, overloadlist, '({0:.1f} MVA)'.format(totaloverloading))
+            print('DOMINANT OUTAGES{0:d} ({1:d})'.format(iteration, len(overloadlist)), dominantoutages, overloadlist, '({0:.1f} MVA)'.format(totaloverloading))
     else:
         print('REMAINING N-1 OVERLOADS = {0:d}'.format(len(overloadlist)))
-        print('OUTAGES WITH OVERLOADS =', dominantoutages)
-        print('TOTAL OVERLOADING = {0:.1f} MVA'.format(totaloverloading))
+        print('N-1 OUTAGES WITH OVERLOADS =', dominantoutages)
+        print('TOTAL N-1 OVERLOADING = {0:.1f} MVA'.format(totaloverloading))
     return dominantoutages, totaloverloading
 
 
@@ -495,7 +496,7 @@ if __name__ == "__main__":
     swgens_data = get_swgens_data(swingbus, raw_data.raw.generators)
 
     # -- GET ALTERNATE SWING BUS ------------------------------------------------------------------
-    alt_swingbus, alt_sw_genkey = get_alt_swingbus(raw_data.raw.generators, raw_data.raw.buses, swingbus, swing_kv)
+    # alt_swingbus, alt_sw_genkey = get_alt_swingbus(raw_data.raw.generators, raw_data.raw.buses, swingbus, swing_kv)
 
     # =============================================================================================
     # == CREATE NETWORK ===========================================================================
@@ -525,9 +526,9 @@ if __name__ == "__main__":
             sw_vmax_c = bus.evhi
             sw_vmin_c = bus.evlo
         # -- BASE NETWORK -------------------------------------------------------------------------
-        pp.create_bus(net_a, vn_kv=busnomkv, name=bus.name, zone=busarea, max_vm_pu=bus.nvhi-1e-4, min_vm_pu=bus.nvlo+1e-4, in_service=True, index=busnum)
+        pp.create_bus(net_a, vn_kv=busnomkv, name=bus.name, zone=busarea, max_vm_pu=bus.nvhi-MaxMinBusVoltageAdj, min_vm_pu=bus.nvlo+MaxMinBusVoltageAdj, in_service=True, index=busnum)
         # -- CONTINGENCY NETWORK ------------------------------------------------------------------
-        idx = pp.create_bus(net_c, vn_kv=busnomkv, name=bus.name, zone=busarea, max_vm_pu=bus.evhi-1e-4, min_vm_pu=bus.evlo+1e-4, in_service=True, index=busnum)
+        idx = pp.create_bus(net_c, vn_kv=busnomkv, name=bus.name, zone=busarea, max_vm_pu=bus.evhi-MaxMinBusVoltageAdj, min_vm_pu=bus.evlo+MaxMinBusVoltageAdj, in_service=True, index=busnum)
         if busnum == swingbus:
             swingbus_idx = idx
         bus_dict.update({busnum: [round(bus.nvlo, 5), round(bus.nvhi, 5)]})
@@ -885,7 +886,7 @@ if __name__ == "__main__":
     # -- CREATE CONTINGENCY NETWORK EXTERNAL GRID -------------------------------------------------
     pp.create_bus(net_c, vn_kv=swing_kv, name='Ex_Grid_Bus', max_vm_pu=sw_vmax_c, min_vm_pu=sw_vmin_c, index=ext_grid_idx)
     tie_idx = pp.create_line_from_parameters(net_c, swingbus, ext_grid_idx, 1.0, 0.0, 0.001, 0.0, ext_tie_rating, name='Swing-Tie', in_service=True, max_loading_percent=100.0)
-    alt_tie_idx = pp.create_line_from_parameters(net_c, alt_swingbus, ext_grid_idx, 1.0, 0.0, 0.001, 0.0, ext_tie_rating, name='Swing-Tie', in_service=False, max_loading_percent=100.0)
+    # alt_tie_idx = pp.create_line_from_parameters(net_c, alt_swingbus, ext_grid_idx, 1.0, 0.0, 0.001, 0.0, ext_tie_rating, name='Swing-Tie', in_service=False, max_loading_percent=100.0)
     pp.create_ext_grid(net_c, ext_grid_idx, vm_pu=swing_vreg, va_degree=swing_angle, max_p_mw=1e-3, min_p_mw=-1e-3, max_q_mvar=1e-3, min_q_mvar=-1e-3,
                        s_sc_max_mva=1.0, s_sc_min_mva=1.0, rx_max=0.01, rx_min=0.01, index=ext_grid_idx)
     pp.create_poly_cost(net_c, ext_grid_idx, 'ext_grid', cp1_eur_per_mw=0, cp0_eur=1e9, cq1_eur_per_mvar=0, cq0_eur=1e9)
@@ -925,9 +926,9 @@ if __name__ == "__main__":
     pp.runpp(net_c, enforce_q_lims=True)                                                            # RUN POWERFLOW
 
     # -- ATTEMPT AT BETTER ESTIMATE FOR SWING VREG ------------------------------------------------
-    net = estimate_swing_vreg(net, nlevel_buses, swingbus_idx, swinggen_idxs, ext_grid_idx)
-    net_a = estimate_swing_vreg(net, nlevel_buses, swingbus_idx, swinggen_idxs, ext_grid_idx)
-    net_c = estimate_swing_vreg(net, nlevel_buses, swingbus_idx, swinggen_idxs, ext_grid_idx)
+    net = estimate_swing_vreg(net, nlevel_buses, swingbus_idx, swinggen_idxs, ext_grid_idx)         # SET SWING GENERATOR(S) VREG TO MAX OF NEIGHBOR BUSES
+    net_a = estimate_swing_vreg(net, nlevel_buses, swingbus_idx, swinggen_idxs, ext_grid_idx)       # SET SWING GENERATOR(S) VREG TO MAX OF NEIGHBOR BUSES
+    net_c = estimate_swing_vreg(net, nlevel_buses, swingbus_idx, swinggen_idxs, ext_grid_idx)       # SET SWING GENERATOR(S) VREG TO MAX OF NEIGHBOR BUSES
     pp.runpp(net, enforce_q_lims=True)                                                              # SOLVE INITIAL BASE NETWORK
     pp.runpp(net_a, enforce_q_lims=True)                                                            # SOLVE INITIAL BASE NETWORK
     pp.runpp(net_c, enforce_q_lims=True)                                                            # SOLVE INITIAL CONTINGENCY NETWORK
@@ -937,8 +938,8 @@ if __name__ == "__main__":
     # *********************************************************************************************
     print('-------------------- ATTEMPTING BASECASE SCOPF ---------------------')
     elapsed_time = round(time.time() - master_start_time, 3)                                        # GET THE ELAPSED TIME SO FAR
-    time_to_finalize = 100.0 + 30.0                             # ADD SOME MARGIN                   # TODO ... GUESS AT TIME TO FINALIZE
-    countdown_time = MaxRunningTime - elapsed_time - time_to_finalize
+    time_to_finalize = 30.0                                                                         # TODO ... GUESS AT TIME TO FINALIZE
+    countdown_time = MaxRunningTime - elapsed_time - time_to_finalize                               # INITIALIZE COUNTDOWN TIME
     a_net = copy.deepcopy(net_a)                                                                    # INITIALIZE FIRST MASTER BASECASE
 
     # =============================================================================================
@@ -960,8 +961,8 @@ if __name__ == "__main__":
         c_net.trafo['max_loading_percent'] = net_c.trafo['max_loading_percent']                     # CHANGE XFMR MAXLOADING TO RATEC
         # == GET DOMINANT OUTAGES RESULTING IN BRANCH LOADING VIOLATIONS ==========================
         max_total_overloading = 9999.9                                                              # INITIALIZE MAX TOTAL OVERLOAING FOR THIS ITERATION
-        dominant_outages, total_overloading = get_dominant_outages(c_net, goutagekeys, boutagekeys, online_gens, gen_dict, line_dict, xfmr_dict, swinggen_idxs, tie_idx,
-                                                                   alt_tie_idx, alt_sw_genkey, ext_grid_idx, step, line_ratec_dict, xfmr_ratec_dict, False)
+        dominant_outages, total_overloading = get_dominant_outages(c_net, goutagekeys, boutagekeys, online_gens, gen_dict, line_dict, xfmr_dict, swinggen_idxs,
+                                                                   step, line_ratec_dict, xfmr_ratec_dict, False)
         remaining_outages = [x for x in dominant_outages if x not in processed_outages]             # GET REMAINING OUTAGES
 
         if total_overloading < max_total_overloading:                                               # CHECK IF TOTAL N-1 OVERLOADING IS LESS LESS THAN MAX TOTAL OVERLOADIN...
@@ -989,8 +990,8 @@ if __name__ == "__main__":
             ex_qgen = a_net.res_ext_grid.loc[ext_grid_idx, 'q_mvar']                                # GET EXTERNAL GRID REACTIVE POWER
             print('MAX BASECASE LOADING = {0:.2f}'.format(max_basecase_loading))                    # PRINT MAX BASECASE BRANCH LOADING
             print('MIN - MAX BASECASE VOLTAGE =', [min_busvoltage, max_busvoltage])                 # PRINT MIN-MAX BASECASE VOLTAGES
-            dominant_outages, total_overloading = get_dominant_outages(c_net, goutagekeys, boutagekeys, online_gens, gen_dict, line_dict, xfmr_dict, swinggen_idxs, tie_idx,
-                                                                       alt_tie_idx, alt_sw_genkey, ext_grid_idx, step, line_ratec_dict, xfmr_ratec_dict, True)
+            dominant_outages, total_overloading = get_dominant_outages(c_net, goutagekeys, boutagekeys, online_gens, gen_dict, line_dict, xfmr_dict, swinggen_idxs,
+                                                                       step, line_ratec_dict, xfmr_ratec_dict, True)
             print('EXT_PGEN - EXT_QGEN =', [round(ex_pgen, 4), round(ex_qgen, 4)])                  # PRINT EXTERNAL GRID REAL AND REACTIVE POWER
             print('BASECASE SCOPF NETWORK CREATED .....................................', round(time.time() - start_time, 3), 'sec')
             # a_net.gen['min_p_mw'] = net_a.gen['min_p_mw']                                           # ? RESTORE BASECASE GENERATOR'S MINIMUM POWER OUTPUT
@@ -1004,15 +1005,6 @@ if __name__ == "__main__":
         if o_key in online_gens:                                                                    # CHECK IF A GENERATOR...
             g_idx = gen_dict[o_key]                                                                 # GET GENERATOR INDEX
             net.gen.in_service[g_idx] = False                                                       # SWITCH OFF OUTAGED GENERATOR
-            if g_idx in swinggen_idxs and len(swinggen_idxs) == 1:                                  # CHECK IF OUTAGE IS A SWING GENERATOR
-                net.line.loc[tie_idx, 'in_service'] = False                                         # OPEN SWING TIE
-                net.line.loc[alt_tie_idx, 'in_service'] = True                                      # CLOSE ALTERNATE SWING TIE
-                alt_sw_gidx = gen_dict[alt_sw_genkey]                                               # GET ALTERNATE SWING GENERATOR INDEX
-                alt_swbus = genbus_dict[alt_sw_gidx]                                                # GET ALTERNATE SWINGBUS INDEX
-                alt_swvreg = net.gen.loc[alt_sw_gidx, 'vm_pu']                                      # GET ALTERNATE SWING GENERATOR VOLTAGE SETpoint
-                alt_swangle = net.res_bus.loc[alt_swbus, 'va_degree']                               # GET ALTERNATE SWINGBUS ANGLE
-                net.ext_grid.loc[ext_grid_idx, 'vm_pu'] = alt_swvreg                                # SET EXTGRID VOLTAGE SETPOINT
-                net.ext_grid.loc[ext_grid_idx, 'va_degree'] = alt_swangle                           # SET EXTGRID REFERENCE ANGLE
         elif o_key in line_dict:                                                                    # CHECK IF A LINE...
             line_idx = line_dict[o_key]                                                             # GET LINE INDEX
             net.line.in_service[line_idx] = False                                                   # SWITCH OUT OUTAGED LINE
@@ -1024,7 +1016,8 @@ if __name__ == "__main__":
             pp.runopp(net, init='pf', enforce_q_lims=True)                                          # RUN OPF ON THIS NETWORK
         except:                                                                                                             # IF NO SOLUTION...
             print('SUB-NETWORK DID NOT SOLVE WITH OPF .................................', o_key, ' SKIP, GET NEXT OUTAGE')  # PRINT NOSOLVE MESSAGE
-            continue                                                                                                        # GET NEXT CONTINGENCY
+            processed_outages.append(o_key)
+            continue                                                                                # GET NEXT CONTINGENCY
         net = copy_opf_to_network(net, gen_dict, genbus_dict, swingbus, swsh_dict, swshbus_dict)    # COPY OPF RESULTS TO THIS NETWORK
         pp.runpp(net, enforce_q_lims=True)                                                          # SOLVE THIS NETWORK WITH POWERFLOW
 
@@ -1055,41 +1048,17 @@ if __name__ == "__main__":
     # =============================================================================================
     print('-------------------- FINE-TUNING SCOPF BASECASE --------------------')
     start_time = time.time()
-    # -- COPY SCOPF RESULTS TO BASECASE AND CONTINGENCY NETWORKS ----------------------------------
-    # net = copy_opf_to_network(net, gen_dict, genbus_dict, swingbus, swsh_dict, swshbus_dict)        # COPY OPF RESULTS TO THIS NETWORK
-    # net_a = copy_opf_to_network(net, gen_dict, genbus_dict, swingbus, swsh_dict, swshbus_dict)      # COPY OPF RESULTS TO THIS NETWORK
-    # net_c = copy_opf_to_network(net, gen_dict, genbus_dict, swingbus, swsh_dict, swshbus_dict)      # COPY OPF RESULTS TO THIS NETWORK
-    # pp.runpp(net, enforce_q_lims=True)                                                              # RUN POWERFLOW
-    # pp.runpp(net_a, enforce_q_lims=True)                                                            # RUN POWERFLOW
-    # pp.runpp(net_c, enforce_q_lims=True)                                                            # RUN POWERFLOW
 
     # -- FINAL ATTEMPT AT BETTER ESTIMATE FOR SWING VREG ------------------------------------------
-    net_a = estimate_swing_vreg(net_a, nlevel_buses, swingbus_idx, swinggen_idxs, ext_grid_idx)
+    net_a = estimate_swing_vreg(net_a, nlevel_buses, swingbus_idx, swinggen_idxs, ext_grid_idx)     # SET SWING GENERATOR(S) VREG TO MAX OF NEIGHBOR BUSES
     pp.runpp(net_a, enforce_q_lims=True)                                                            # SOLVE WITH POWERFLOW
 
-    # net = estimate_swing_vreg(net, nlevel_buses, swingbus_idx, swinggen_idxs, ext_grid_idx)
-    # net_a = estimate_swing_vreg(net, nlevel_buses, swingbus_idx, swinggen_idxs, ext_grid_idx)
-    # net_c = estimate_swing_vreg(net, nlevel_buses, swingbus_idx, swinggen_idxs, ext_grid_idx)
-    # pp.runpp(net, enforce_q_lims=True)                                                              # SOLVE INITIAL BASE NETWORK
-    # pp.runpp(net_a, enforce_q_lims=True)                                                            # SOLVE INITIAL BASE NETWORK
-    # pp.runpp(net_c, enforce_q_lims=True)                                                            # SOLVE INITIAL CONTINGENCY NETWORK
-
-    # TODO FOCUS ON BASECASE BUS VOLTAGES ---------------------------------------
+    # TODO? RUN OPF ON BASECASE TO CORRECT HIGH OR LOW BUS VOLTAGES -------------------------------
     # pp.runopp(net_a, init='pf', enforce_q_lims=True)                                                  # RUN OPF ON THIS NETWORK
     # net_a = copy_opf_to_network(net_a, gen_dict, genbus_dict, swingbus, swsh_dict, swshbus_dict)        # COPY OPF RESULTS TO THIS NETWORK
     # pp.runpp(net_a, enforce_q_lims=True)                                                              # RUN POWERFLOW
 
-    # net = copy.deepcopy(net_a)
-    # pp.runopp(net, init='pf', enforce_q_lims=True)                                                  # RUN OPF ON THIS NETWORK
-    # net = copy_opf_to_network(net, gen_dict, genbus_dict, swingbus, swsh_dict, swshbus_dict)        # COPY OPF RESULTS TO THIS NETWORK
-    # net_a = copy_opf_to_network(net, gen_dict, genbus_dict, swingbus, swsh_dict, swshbus_dict)      # COPY OPF RESULTS TO THIS NETWORK
-    # net_c = copy_opf_to_network(net, gen_dict, genbus_dict, swingbus, swsh_dict, swshbus_dict)      # COPY OPF RESULTS TO THIS NETWORK
-    # pp.runpp(net, enforce_q_lims=True)                                                              # RUN POWERFLOW
-    # pp.runpp(net_a, enforce_q_lims=True)                                                            # RUN POWERFLOW
-    # pp.runpp(net_c, enforce_q_lims=True)                                                            # RUN POWERFLOW
-
     # -- INSURE GENERATORS ARE MEETING VOLTAGE SCHEDULE -------------------------------------------
-    # net = copy.deepcopy(net_a)
     previous_genbus = None                                                                          # IN CASE THERE IS MORE THAN ONE GENERATOR PER BUS
     for gkey in gen_dict:                                                                           # LOOP ACROSS GENERATOR KEYS
         gidx = gen_dict[gkey]                                                                       # GET GENERATOR INDEX
@@ -1102,12 +1071,8 @@ if __name__ == "__main__":
             continue                                                                                # IF SWING BUS, GET NEXT GENERATOR
         if qgen == qmin or qgen == qmax:                                                            # IF THIS GENERATOR AT +/- QLIMIT...
             net_a.gen.loc[gidx, 'vm_pu'] = bus_voltage                                                # THIS NETWORK, SET THIS GENERATORS VREG TO BUS VOLTAGE
-            # net_a.gen.loc[gidx, 'vm_pu'] = bus_voltage                                              # THIS NETWORK, SET THIS GENERATORS VREG TO BUS VOLTAGE
-            # net_c.gen.loc[gidx, 'vm_pu'] = bus_voltage                                              # THIS NETWORK, SET THIS GENERATORS VREG TO BUS VOLTAGE
             if genbus != previous_genbus:                                                           # IF ALL GENERATORS ON THIS BUS ARE FOUND...
                 pp.runpp(net_a, init='results', enforce_q_lims=True)                                  # THIS NETWORK, RUN STRAIGHT POWER FLOW
-                # pp.runpp(net_a, init='results', enforce_q_lims=True)                                # THIS NETWORK, RUN STRAIGHT POWER FLOW
-                # pp.runpp(net_c, init='results', enforce_q_lims=True)                                # THIS NETWORK, RUN STRAIGHT POWER FLOW
         previous_genbus = genbus
 
     # -- INSURE SWSHUNTS SUSCEPTANCE IS WITHIN LIMITS IN BASECASE ---------------------------------
@@ -1122,26 +1087,19 @@ if __name__ == "__main__":
         if voltage < 1.0:                                                                           # IF BUS VOLTAGE IS < 1.0 (SUSCEPTANCE COULD BE EXCEEDED)
             if qgen / voltage ** 2 < 0.98 * qmin < 0.0:                                             # CHECK IF QMIN IS NEGATIVE AND SUSCEPTANCE OUT OF BOUNDS
                 new_qmin = min(qmax, 0.99 * qmin * voltage ** 2)                                    # CALCULATE QMIN THAT IS IN BOUNDS
-                # net.gen.loc[shidx, 'min_q_mvar'] = new_qmin                                         # ADJUST QMIN IN POSITIVE DIRECTION WITH SOME EXTRA
                 net_a.gen.loc[shidx, 'min_q_mvar'] = new_qmin                                       # ADJUST QMIN IN POSITIVE DIRECTION WITH SOME EXTRA
-                # net_c.gen.loc[shidx, 'min_q_mvar'] = new_qmin                                       # ADJUST QMIN IN POSITIVE DIRECTION WITH SOME EXTRA
                 # print(shkey, 'Adj QMIN Up', 'QMIN =', qmin, 'NEW QMIN =', new_qmin)               # DEVELOPEMENT... PRINT MESSAGE
             elif qgen / voltage ** 2 > 0.98 * qmax > 0.0:                                           # CHECK IF QMAX IS NEGATIVE AND SUSCEPTANCE OUT OF BOUNDS
                 new_qmax = max(qmin, 0.99 * qmax * voltage ** 2)                                    # CALCULATE QMAX THAT IS IN BOUNDS
-                # net.gen.loc[shidx, 'max_q_mvar'] = new_qmax                                         # ADJUST QMAX IN NEGATIVE DIRECTION WITH SOME EXTRA
                 net_a.gen.loc[shidx, 'max_q_mvar'] = new_qmax                                       # ADJUST QMAX IN NEGATIVE DIRECTION WITH SOME EXTRA
-                # net_c.gen.loc[shidx, 'max_q_mvar'] = new_qmax                                       # ADJUST QMAX IN NEGATIVE DIRECTION WITH SOME EXTRA
                 # print(shkey, 'Adj QMAX Down', 'QMAX =', qmax, 'NEW QMAX =', new_qmax)             # DEVELOPEMENT... PRINT MESSAGE
-            # pp.runpp(net, init='results', enforce_q_lims=True)                                      # THIS NETWORK, RUN STRAIGHT POWER FLOW
             pp.runpp(net_a, init='results', enforce_q_lims=True)                                    # THIS NETWORK, RUN STRAIGHT POWER FLOW
-            # pp.runpp(net_c, init='results', enforce_q_lims=True)                                    # THIS NETWORK, RUN STRAIGHT POWER FLOW
     external_pgen = net_a.res_ext_grid.loc[ext_grid_idx, 'p_mw']                                    # GET EXTERNAL GRID REAL POWER
     external_qgen = net_a.res_ext_grid.loc[ext_grid_idx, 'q_mvar']                                  # GET EXTERNAL GRID REACTIVE POWER
 
     # ---------------------------------------------------------------------------------------------
     # -- ZERO OUT EXTERNAL GRID REAL AND REACTIVE POWER (IF NEEDED)  ------------------------------
     # ---------------------------------------------------------------------------------------------
-    # net = copy.deepcopy(net_a)
     external_pgen_threshold = 1e-4                                                                  # THRESHOLD FOR ZEROING OUT BASECASE EXTERNAL PGEN
     external_qgen_threshold = 1e-4                                                                  # THRESHOLD FOR ZEROING OUT BASECASE EXTERNAL QGEN
     zeroed = True                                                                                   # INITIALIZE ZEROED FLAG
@@ -1193,18 +1151,14 @@ if __name__ == "__main__":
                         continue                                                                    # GET NEXT GENERATOR
                     delta_pgen = external_pgen * p_downmargin_dict[gidx] / p_downmargin_total       # CALCULATE GENERATOR INCREMENT (DISTRIBUTED PROPORTIONALLY)
                     new_pgen = pgen + delta_pgen                                                    # CALCULATE  GENERATOR NEXT PGEN
-                    # net.gen.loc[gidx, 'p_mw'] = new_pgen                                            # SET GENERATOR PGEN FOR THIS NETWORK
                     net_a.gen.loc[gidx, 'p_mw'] = new_pgen                                          # SET GENERATOR PGEN FOR THIS NETWORK
-                    # net_c.gen.loc[gidx, 'p_mw'] = new_pgen                                          # SET GENERATOR PGEN FOR THIS NETWORK
                 if external_pgen > external_pgen_threshold:                                         # CHECK IF EXTERNAL REAL POWER IS POSITIVE
                     p_upmargin = p_upmargin_dict[gidx]                                              # GET THIS GENERATORS P-UP MARGIN
                     if p_upmargin < 1.0:                                                            # IF NO MARGIN...
                         continue                                                                    # GET NEXT GENERATOR
                     delta_pgen = external_pgen * p_upmargin / p_upmargin_total                      # CALCULATE GENERATOR INCREMENT (DISTRIBUTED PROPORTIONALLY)
                     new_pgen = pgen + delta_pgen                                                    # CALCULATE  GENERATOR NEXT PGEN
-                    # net.gen.loc[gidx, 'p_mw'] = new_pgen                                            # SET GENERATOR PGEN FOR THIS NETWORK
                     net_a.gen.loc[gidx, 'p_mw'] = new_pgen                                          # SET GENERATOR PGEN FOR THIS NETWORK
-                    # net_c.gen.loc[gidx, 'p_mw'] = new_pgen                                          # SET GENERATOR PGEN FOR THIS NETWORK
         if abs(external_qgen) > external_qgen_threshold:                                            # CHECK IF EXTERNAL REACTIVE POWER EXCEED THRESHOLD
             for gkey in participating_gens:                                                         # LOOP THROUGH PARTICIPATING GENERATORS
                 gidx = gen_dict[gkey]                                                               # GET THIS PARTICIPATING GENERATOR INDEX
@@ -1218,24 +1172,18 @@ if __name__ == "__main__":
                         continue                                                                        # IF SO, GET NEXT GENERATOR
                     delta_vreg = 0.020 * external_qgen * q_downmargin_dict[gidx] / q_downmargin_total   # CALCULATE SETPOINT INCREMENT (PROPORTIONAL)
                     new_vreg = vreg + delta_vreg                                                        # CALCULATE NEW SET POINT
-                    # net.gen.loc[gidx, 'vm_pu'] = new_vreg                                           # SET GENERATOR QGEN FOR THIS NETWORK
                     net_a.gen.loc[gidx, 'vm_pu'] = new_vreg                                         # SET GENERATOR QGEN FOR THIS NETWORK
-                    # net_c.gen.loc[gidx, 'vm_pu'] = new_vreg                                         # SET GENERATOR QGEN FOR THIS NETWORK
                 if external_qgen > external_qgen_threshold:                                         # CHECK IF EXTERNAL REACTIVE POWER IS POSITIVE
                     q_upmargin = q_upmargin_dict[gidx]                                              # GET THIS GENERATORS Q-UP MARGIN
                     if vreg > 1.099 or q_upmargin < 1.0:                                            # IF NO MARGIN, OR BUS VOLTAGE IS HIGH...
                         continue                                                                    # IF SO, GET NEXT GENERATOR
                     delta_vreg = 0.020 * external_qgen * q_upmargin_dict[gidx] / q_upmargin_total   # CALCULATE SETPOINT INCREMENT (DISTRIBUTED PROPORTIONALLY)
                     new_vreg = vreg + delta_vreg                                                    # CALCULATE NEW SET POINT
-                    # net.gen.loc[gidx, 'vm_pu'] = new_vreg                                           # SET GENERATOR QGEN FOR THIS NETWORK
                     net_a.gen.loc[gidx, 'vm_pu'] = new_vreg                                         # SET GENERATOR QGEN FOR THIS NETWORK
-                    # net_c.gen.loc[gidx, 'vm_pu'] = new_vreg                                         # SET GENERATOR QGEN FOR THIS NETWORK
         pp.runpp(net_a, enforce_q_lims=True)                                                          # RUN STRAIGHT POWER FLOW ON THIS NETWORK
         external_pgen = net_a.res_ext_grid.loc[ext_grid_idx, 'p_mw']                                  # GET EXTERNAL GRID REAL POWER
         external_qgen = net_a.res_ext_grid.loc[ext_grid_idx, 'q_mvar']                                # GET EXTERNAL GRID REACTIVE POWER
         zstep += 1                                                                                   # INCREMENT ITERATOR
-    # pp.runpp(net_c, enforce_q_lims=True)                                                            # RUN STRAIGHT POWER FLOW ON CONTINGENCY BASECASE
-    # pp.runpp(net_a, enforce_q_lims=True)                                                            # RUN STRAIGHT POWER FLOW ON BASECASE
 
     ex_pgen = net_a.res_ext_grid.loc[ext_grid_idx, 'p_mw']                                          # GET EXTERNAL GRID REAL POWER
     ex_qgen = net_a.res_ext_grid.loc[ext_grid_idx, 'q_mvar']                                        # GET EXTERNAL GRID REACTIVE POWER
