@@ -178,29 +178,6 @@ def get_swgens_data(swbus, generators):
     return swgens_data
 
 
-# def get_alt_swingbus(generators, buses, swbus, sw_kv):
-#     """find an alternate swing generator"""
-#     # generators = (gen.i, gen.id, gen.pg, gen.qg, gen.qt, gen.qb, gen.vs, gen.pt, gen.pb, gen.stat)
-#     # buses = (bus.i, bus.ide, bus.baskv, bus.area, bus.vm, bus.va, bus.nvhi, bus.nvlo, bus.evhi, bus.evlo)
-#     max_pmargin_list = [[g.pt - g.pg, g.i, str(g.i) + '-' + g.id, 0.0] for g in generators.values() if g.i != swbus and g.stat != 0]
-#     max_pmargin_list.sort(reverse=True)
-#     for g in range(len(max_pmargin_list)):                                                          # loop across indexes of the pmargin lists
-#         g_bus = max_pmargin_list[g][1]                                                              # get the generator busnumber from this list
-#         count_gens = 0                                                                              # initialize generator counter (to insure only one generator on the bus)
-#         for gg in max_pmargin_list:                                                                 # loop through the pmargin lists
-#             if gg[1] == g_bus:                                                                      # if this list has this genbus in it...
-#                 count_gens += 1                                                                     # increment the gen counter
-#         if count_gens == 1:                                                                         # if only one generator on the bus....
-#             for bus in buses.values():                                                              # loop across the bus objects
-#                 if bus.i == g_bus:                                                                  # if the busnumber = this generator bus...
-#                     max_pmargin_list[g][3] = bus.baskv                                              # change the fourth element to the buskv (this will remain 0.0 if count != 1)
-#     sw_candidates = [g for g in max_pmargin_list if g[3] == sw_kv]                                  # get alternate swing bus candidates with bus kv = original swing bus kv
-#     sw_candidates.sort(reverse=True)                                                                # sort largest pmargin to smallest pmargin
-#     swbus1 = sw_candidates[0][1]                                                                    # assign alternate swing bus to the top candidate's swing bus
-#     swgkey = sw_candidates[0][2]                                                                    # assign alternate swing gen key to the top candidate's gen key
-#     return swbus1, swgkey
-
-
 def copy_opf_to_network(netx, gendict, genbusdict, swbus, swshdict, swshbusdict):
     """copy opf results to this network"""
     netx.gen['p_mw'] = netx.res_gen['p_mw']                                                         # set this network generators power to opf results
@@ -494,9 +471,6 @@ if __name__ == "__main__":
 
     # -- GET SWING GEN DATA FROM GENDATA (REMOVE SWING GEN FROM GENDATA) --------------------------
     swgens_data = get_swgens_data(swingbus, raw_data.raw.generators)
-
-    # -- GET ALTERNATE SWING BUS ------------------------------------------------------------------
-    # alt_swingbus, alt_sw_genkey = get_alt_swingbus(raw_data.raw.generators, raw_data.raw.buses, swingbus, swing_kv)
 
     # =============================================================================================
     # == CREATE NETWORK ===========================================================================
@@ -886,7 +860,6 @@ if __name__ == "__main__":
     # -- CREATE CONTINGENCY NETWORK EXTERNAL GRID -------------------------------------------------
     pp.create_bus(net_c, vn_kv=swing_kv, name='Ex_Grid_Bus', max_vm_pu=sw_vmax_c, min_vm_pu=sw_vmin_c, index=ext_grid_idx)
     tie_idx = pp.create_line_from_parameters(net_c, swingbus, ext_grid_idx, 1.0, 0.0, 0.001, 0.0, ext_tie_rating, name='Swing-Tie', in_service=True, max_loading_percent=100.0)
-    # alt_tie_idx = pp.create_line_from_parameters(net_c, alt_swingbus, ext_grid_idx, 1.0, 0.0, 0.001, 0.0, ext_tie_rating, name='Swing-Tie', in_service=False, max_loading_percent=100.0)
     pp.create_ext_grid(net_c, ext_grid_idx, vm_pu=swing_vreg, va_degree=swing_angle, max_p_mw=1e-3, min_p_mw=-1e-3, max_q_mvar=1e-3, min_q_mvar=-1e-3,
                        s_sc_max_mva=1.0, s_sc_min_mva=1.0, rx_max=0.01, rx_min=0.01, index=ext_grid_idx)
     pp.create_poly_cost(net_c, ext_grid_idx, 'ext_grid', cp1_eur_per_mw=0, cp0_eur=1e9, cq1_eur_per_mvar=0, cq0_eur=1e9)

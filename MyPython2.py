@@ -38,7 +38,7 @@ if not sys.argv[1:]:
     # -- WRITE SUBMISSION.CONF FILE ---------------------------------------------------------------
     SFile = open('submission.conf', 'w')
     SFile.write('modules=python/3.7.2\n')
-    SFile.write('model=Network_03R-01\n')               # TODO FOR SANDBOX ONLY
+    SFile.write('model=Network_01R-01\n')               # TODO FOR SANDBOX ONLY
     SFile.write('scenario=1\n')                         # TODO FOR SANDBOX ONLY
     # SFile.write('model=' + network + '\n')
     # SFile.write('scenario=' + scenario_num + '\n')
@@ -47,6 +47,7 @@ if not sys.argv[1:]:
     SFile.write('export PATH="$GUROBI_811_HOME/bin:$PATH"\n')
     SFile.write('export LD_LIBRARY_PATH="$GUROBI_811_HOME/lib:$LD_LIBRARY_PATH"\n')
     SFile.write('export GRB_LICENSE_FILE="$GUROBI_811_HOME/license/gurobi_client.lic"\n')
+    SFile.write('srun_options2=-N6"\n')
     SFile.close()
 
 start_time = time.time()
@@ -55,7 +56,7 @@ cs = julia.Julia()
 C2S = cs.include('Code2_Solver.jl')
 C2S(con_fname, inl_fname, raw_fname, rop_fname, output_dir="")
 print()
-print('SOLUTION2 FILE GENERATED ...............................................', round(time.time() - start_time), 3)
+print('SOLUTION2 FILE GENERATED ...............................................', round(time.time() - start_time, 3))
 
 # == DEVELOPEMENT, COPY FILES FOR EVALUATION ------------------------------------------------
 if not sys.argv[1:]:
@@ -63,4 +64,5 @@ if not sys.argv[1:]:
     dirname = os.path.dirname(__file__)
     shutil.copy(outfname, os.path.join(dirname, 'GitHub_Work'))
     shutil.copy('submission.conf', os.path.join(dirname, 'GitHub_Work'))
+    shutil.copy('Code2_Solver.jl', os.path.join(dirname, 'GitHub_Work'))
     shutil.copy(os.path.realpath(__file__), os.path.join(dirname, 'GitHub_Work/MyPython2.py'))
