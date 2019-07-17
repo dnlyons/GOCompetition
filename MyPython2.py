@@ -47,7 +47,7 @@ if not sys.argv[1:]:
     SFile.write('export PATH="$GUROBI_811_HOME/bin:$PATH"\n')
     SFile.write('export LD_LIBRARY_PATH="$GUROBI_811_HOME/lib:$LD_LIBRARY_PATH"\n')
     SFile.write('export GRB_LICENSE_FILE="$GUROBI_811_HOME/license/gurobi_client.lic"\n')
-    SFile.write('srun_options2=-N6"\n')
+    SFile.write('srun_options2=-N6\n')
     SFile.close()
 
 start_time = time.time()
