@@ -884,22 +884,21 @@ if __name__ == "__main__":
 
     # -- SOLVE INITIAL NETWORKS WITH STRAIGHT POWERFLOW -------------------------------------------
     # solve_starttime = time.time()
-    # pp.runopp(net_a, enforce_q_lims=True)                                                  # RUN OPF ON THIS NETWORK
-    # # pp.runpp(net_a, enforce_q_lims=False)                                                            # SOLVE INITIAL BASE NETWORK
-    # pp.runpp(net_a, init='results', enforce_q_lims=True)                                                            # SOLVE INITIAL BASE NETWORK
+    # pp.runpp(net_a,  enforce_q_lims=True)                                                           # SOLVE INITIAL BASE NETWORK
     # pp.runpp(net_c, enforce_q_lims=True)                                                            # SOLVE INITIAL CONTINGENCY NETWORK
     # print('   NETWORKS SOLVED .................................................', round(time.time() - solve_starttime, 3), 'sec')
 
     # -- SOLVE INITIAL NETWORKS WITH OPF ----------------------------------------------------------
+    solve_starttime = time.time()
     net = copy.deepcopy(net_a)
-    # pp.runopp(net, init='pf', enforce_q_lims=True)                                                  # RUN OPF ON THIS NETWORK
-    pp.runopp(net, enforce_q_lims=True)                                                  # RUN OPF ON THIS NETWORK
+    pp.runopp(net, enforce_q_lims=True)                                                             # RUN OPF ON THIS NETWORK
     net = copy_opf_to_network(net, gen_dict, genbus_dict, swingbus, swsh_dict, swshbus_dict)        # COPY OPF RESULTS TO THIS NETWORK
     net_a = copy_opf_to_network(net, gen_dict, genbus_dict, swingbus, swsh_dict, swshbus_dict)      # COPY OPF RESULTS TO THIS NETWORK
     net_c = copy_opf_to_network(net, gen_dict, genbus_dict, swingbus, swsh_dict, swshbus_dict)      # COPY OPF RESULTS TO THIS NETWORK
     pp.runpp(net, enforce_q_lims=True)                                                              # RUN POWERFLOW
     pp.runpp(net_a, enforce_q_lims=True)                                                            # RUN POWERFLOW
     pp.runpp(net_c, enforce_q_lims=True)                                                            # RUN POWERFLOW
+    print('   NETWORKS SOLVED .................................................', round(time.time() - solve_starttime, 3), 'sec')
 
     # -- ATTEMPT AT BETTER ESTIMATE FOR SWING VREG ------------------------------------------------
     net = estimate_swing_vreg(net, nlevel_buses, swingbus_idx, swinggen_idxs, ext_grid_idx)         # SET SWING GENERATOR(S) VREG TO MAX OF NEIGHBOR BUSES
