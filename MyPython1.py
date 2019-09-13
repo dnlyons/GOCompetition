@@ -37,6 +37,9 @@ if not sys.argv[1:]:
     con_fname = cwd + r'/' + network + r'/' + scenario + r'/case.con'
     inl_fname = cwd + r'/' + network + r'/case.inl'
     rop_fname = cwd + r'/' + network + r'/case.rop'
+    # inl_fname = cwd + r'/' + network + r'/' + scenario + r'/case.inl'
+    # rop_fname = cwd + r'/' + network + r'/' + scenario + r'/case.rop'
+
 
     outfname = cwd + '//solution1.txt'
     MaxRunningTime = 600.0

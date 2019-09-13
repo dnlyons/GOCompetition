@@ -30,7 +30,7 @@ if not sys.argv[1:]:
     # inl_fname = cwd + r'/' + network + r'/' + scenario + r'/case.inl'
     # rop_fname = cwd + r'/' + network + r'/' + scenario + r'/case.rop'
 
-    outfname = cwd + r'/solution2.txt'
+    outfname = cwd + '//solution2.txt'
     try:
         os.remove(outfname)
     except FileNotFoundError:
@@ -40,10 +40,12 @@ if not sys.argv[1:]:
     # -- WRITE SUBMISSION.CONF FILE ---------------------------------------------------------------
     SFile = open('submission.conf', 'w')
     SFile.write('modules=python/3.7.2\n')
-    # SFile.write('model=Network_01R-01\n')                 # TODO FOR SANDBOX ONLY
-    # SFile.write('scenario=1\n')                           # TODO FOR SANDBOX ONLY
-    SFile.write('model=' + network + '\n')                  # TODO FOR SANDBOX ONLY
-    SFile.write('scenario=' + scenario_num + '\n')          # TODO FOR SANDBOX ONLY
+
+    SFile.write('model=Network_03R-01\n')                 # TODO FOR SANDBOX ONLY
+    SFile.write('scenario=1\n')                           # TODO FOR SANDBOX ONLY  delete these reading from network_scenario.config.txt
+
+    # SFile.write('model=' + network + '\n')                  # TODO FOR SANDBOX ONLY
+    # SFile.write('scenario=' + scenario_num + '\n')          # TODO FOR SANDBOX ONLY
     SFile.write('export PATH="$GUROBI_811_HOME/bin:$PATH"\n')
     SFile.write('export LD_LIBRARY_PATH="$GUROBI_811_HOME/lib:$LD_LIBRARY_PATH"\n')
     SFile.write('export GRB_LICENSE_FILE="$GUROBI_811_HOME/license/gurobi_client.lic"\n')
