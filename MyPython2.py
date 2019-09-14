@@ -14,6 +14,7 @@ if sys.argv[1:]:
     inl_fname = sys.argv[2]
     raw_fname = sys.argv[3]
     rop_fname = sys.argv[4]
+    outfname = 'solution2.txt'
 
 # -----------------------------------------------------------------------------
 # -- DEVELOPMENT --- DEVELOPMENT --- DEVELOPMENT --- DEVELOPMENT --------------
@@ -27,8 +28,8 @@ if not sys.argv[1:]:
     con_fname = cwd + r'/' + network + r'/' + scenario + r'/case.con'
     inl_fname = cwd + r'/' + network + r'/case.inl'
     rop_fname = cwd + r'/' + network + r'/case.rop'
-    # inl_fname = cwd + r'/' + network + r'/' + scenario + r'/case.inl'
-    # rop_fname = cwd + r'/' + network + r'/' + scenario + r'/case.rop'
+    # inl_fname = cwd + r'/' + network + r'/' + scenario + r'/case.inl'         # TODO for testing trial results (different directory)
+    # rop_fname = cwd + r'/' + network + r'/' + scenario + r'/case.rop'         # TODO for testing trial results (different directory)
 
     outfname = cwd + '//solution2.txt'
     try:
@@ -41,11 +42,9 @@ if not sys.argv[1:]:
     SFile = open('submission.conf', 'w')
     SFile.write('modules=python/3.7.2\n')
 
-    SFile.write('model=Network_03R-01\n')                 # TODO FOR SANDBOX ONLY
-    SFile.write('scenario=1\n')                           # TODO FOR SANDBOX ONLY  delete these reading from network_scenario.config.txt
+    SFile.write('model=Network_05R-01\n')                 # TODO FOR SANDBOX ONLY   manually enter this here or edit in submission.conf   COMMENT OUT FOR REAL SUBMISSION
+    SFile.write('scenario=1\n')                           # TODO FOR SANDBOX ONLY   manually enter this here or edit in submission.conf   COMMENT OUT FOR REAL SUBMISSION
 
-    # SFile.write('model=' + network + '\n')                  # TODO FOR SANDBOX ONLY
-    # SFile.write('scenario=' + scenario_num + '\n')          # TODO FOR SANDBOX ONLY
     SFile.write('export PATH="$GUROBI_811_HOME/bin:$PATH"\n')
     SFile.write('export LD_LIBRARY_PATH="$GUROBI_811_HOME/lib:$LD_LIBRARY_PATH"\n')
     SFile.write('export GRB_LICENSE_FILE="$GUROBI_811_HOME/license/gurobi_client.lic"\n')

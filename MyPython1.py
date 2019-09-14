@@ -37,8 +37,8 @@ if not sys.argv[1:]:
     con_fname = cwd + r'/' + network + r'/' + scenario + r'/case.con'
     inl_fname = cwd + r'/' + network + r'/case.inl'
     rop_fname = cwd + r'/' + network + r'/case.rop'
-    # inl_fname = cwd + r'/' + network + r'/' + scenario + r'/case.inl'
-    # rop_fname = cwd + r'/' + network + r'/' + scenario + r'/case.rop'
+    # inl_fname = cwd + r'/' + network + r'/' + scenario + r'/case.inl'        # TODO for testing trial results (different directory)
+    # rop_fname = cwd + r'/' + network + r'/' + scenario + r'/case.rop'        # TODO for testing trial results (different directory)
 
 
     outfname = cwd + '//solution1.txt'
@@ -186,6 +186,11 @@ def get_swgens_data(swbus, generators):
         del generators[gen]
     return swgens_data
 
+def copy_dcopf_to_network(copyfrom_net, copyto_net):
+    """copy opf results to this network"""
+    copyto_net.gen['p_mw'] = copyfrom_net.res_gen['p_mw']                                           # set this network generators power to opf results
+    return copyto_net
+
 
 def copy_opf_to_network(copyfrom_net, copyto_net, gendict, genbusdict, swbus, swshdict, swshbusdict):
     """copy opf results to this network"""
@@ -216,171 +221,186 @@ def estimate_swing_vreg(netx, nlevelbuses, swingbusidx, swinggendict, extgrididx
     return netx
 
 
-def get_dominant_outages1(xnet, outagekeys, gendict, linedict, xfmrdict, swinggendict, iteration, dfdict):
+def get_dominant_outages_df(xnet, outagekeys, onlinegens, gendict, linedict, xfmrdict, iteration, dfdict):
     """get dominant outages resulting in branch loading"""
-    swinggen_in_outages = False
-    swinggen_key = ''
-    contrained_line_dict = {}                                                                       # initialize dict
-    contrained_xfmr_dict = {}                                                                       # initialize dict
+    # swinggen_in_outages = False
+    # swinggen_key = ''
+    constrained_line_dict = {}                                                                      # initialize dict
+    constrained_xfmr_dict = {}                                                                      # initialize dict
     for line_key in line_dict:                                                                      # loop through lines
-        contrained_line_dict.update({line_key: []})                                                 # initialize dict
+        constrained_line_dict.update({line_key: []})                                                # initialize dict
     for xfmr_key in xfmr_dict:                                                                      # loop through xfmrs
-        contrained_xfmr_dict.update({xfmr_key: []})                                                 # initialize dict
+        constrained_xfmr_dict.update({xfmr_key: []})                                                # initialize dict
 
-    for o_key in outagekeys:                                                                       # loop across all outages
+    for o_key in outagekeys:                                                                        # loop across all outages
         # -- CHECK IF OUTAGE IS A GENERATOR -------------------------------------------------------
-
-        if o_key in gendict:                                                                     # check if outage is a generator...
-            if o_key in swinggendict and len(swinggendict) == 1 and iteration == 0:
-                swinggen_in_outages = True
-                swinggen_key = o_key
-                break
-            gidx = gendict[o_key]                                                                  # get generator index
+        if o_key in onlinegens:                                                                     # check if outage is a generator...
+            gidx = gendict[o_key]                                                                   # get generator index
             pgen = xnet.res_gen.loc[gidx, 'p_mw']                                                   # get pre-outage generator mw
             # -- LOOP ACROSS MONITORED LINES ----------------------------------
-            for lkey in linedict:                                                                   # loop through monitored line keys
-                df = dfdict[o_key][lkey]                                                           # get distribution factor for this outage, this line
-                lidx = line_dict[lkey]                                                              # get line index
-                from_bus = xnet.line.loc[lidx, 'from_bus']                                          # get line frombus
+            for line_key in linedict:                                                               # loop through monitored line keys
+                df = dfdict[o_key][line_key]                                                        # get distribution factor for this outage, this line
+                line_idx = line_dict[line_key]                                                      # get line index
+                from_bus = xnet.line.loc[line_idx, 'from_bus']                                      # get line frombus
                 nom_kv = xnet.bus.loc[from_bus, 'vn_kv']                                            # get line nominal kv
-                max_i_ka = xnet.line.loc[lidx, 'max_i_ka']                                          # get line maximum current
+                max_i_ka = xnet.line.loc[line_idx, 'max_i_ka']                                      # get line maximum current
                 mva_rating = nom_kv * max_i_ka * math.sqrt(3)                                       # calculate line mva rating
-                pre_mw = xnet.res_line.loc[lidx, 'p_from_mw']                                       # get pre-outage branch mw
-                post_mw = abs(pre_mw + (df * pgen))                                                 # calculate post-outage branch flow
-                loading_pct = 100.0 * post_mw / mva_rating                                          # calculate loading percent
+                pre_mva = xnet.res_line.loc[line_idx, 'p_from_mw']                                  # get pre-outage branch mw
+                mva = abs(pre_mva + (df * pgen))                                                    # calculate post-outage branch flow
+                loading_pct = 100.0 * mva / mva_rating                                              # calculate loading percent
                 if loading_pct > 100.0:                                                             # if loading greater than 100%...
-                    mva_overloading = mva_rating * (loading_pct - 100.0) / 100.0        # calculate mva overloading
-                    contrained_line_dict[lkey].append([mva_overloading, o_key])                         # add percent overloading and outagekey to dict
+                    i_ka = mva / (nom_kv * math.sqrt(3))                                            # calculate line amps flow
+                    mva_overloading = abs(mva_rating - mva)                                         # calculate mva overloading
+                    i_ka_overloading = abs(max_i_ka - i_ka)                                         # calculate current overloading
+                    constrained_line_dict[line_key].append([mva_overloading, o_key, line_key, i_ka_overloading])  # add mva overloading and outagekey to dict
+
             # -- LOOP ACROSS MONITORED XFMRS ----------------------------------
-            for xkey in xfmrdict:                                                                   # loop through monitored xfmr keys
-                df = dfdict[o_key][xkey]                                                           # get distribution factor for this outage, this xfmr
-                xidx = xfmrdict[xkey]                                                               # get xfmr index
-                mva_rating = xnet.trafo.loc[xidx, 'sn_mva']                                         # get xfmr rating
-                pre_mw = xnet.res_trafo.loc[xidx, 'p_hv_mw']                                        # get pre-outage xfmr mw (high bus)
-                post_mw = abs(pre_mw + (df * pgen))                                                 # calculate post-outage branch flow
-                loading_pct = 100.0 * post_mw / mva_rating                                          # calculate loading percent
+            for xfmr_key in xfmrdict:                                                               # loop through monitored xfmr keys
+                df = dfdict[o_key][xfmr_key]                                                        # get distribution factor for this outage, this xfmr
+                xfmr_idx = xfmrdict[xfmr_key]                                                       # get xfmr index
+                mva_rating = xnet.trafo.loc[xfmr_idx, 'sn_mva']                                     # get xfmr rating
+                pre_mva = xnet.res_trafo.loc[xfmr_idx, 'p_hv_mw']                                   # get pre-outage xfmr mw (high bus)
+                mva = abs(pre_mva + (df * pgen))                                                    # calculate post-outage branch flow
+                loading_pct = 100.0 * mva / mva_rating                                              # calculate loading percent
                 if loading_pct > 100.0:                                                             # if loading greater than 100%...
-                    mva_overloading = mva_rating * (loading_pct - 100.0) / 100.0        # calculate mva overloading
-                    contrained_xfmr_dict[xkey].append([mva_overloading, o_key])                         # add percent overloading and outagekey to dict
+                    mva_overloading = abs(mva_rating - mva)                                         # calculate mva overloading
+                    constrained_xfmr_dict[xfmrkey].append([mva_overloading, o_key, xfmr_key, mva])  # add mva overloading and outagekey to dict
 
         # -- CHECK IF OUTAGE IS A LINE ------------------------------------------------------------
         elif o_key in linedict:                                                                     # check if outage is a line...
-            lidx = linedict[o_key]                                                                  # get outaged line index
-            branch_mw = xnet.res_line.loc[lidx, 'p_from_mw']                                        # get pre-outage line mw (from bus)
-            if branch_mw == 0.0:                                                                    # if pre-outage line flow is zero...
-                continue                                                                            # get the next outaged line
+            line_idx = linedict[o_key]                                                              # get outaged line index
+            branch_mw = xnet.res_line.loc[line_idx, 'p_from_mw']                                    # get pre-outage line mw (from bus)
+
             # -- LOOP ACROSS MONITORED LINES ----------------------------------
-            for lkey in linedict:                                                                   # loop through monitored line keys
-                if lkey == o_key:                                                                   # check if monitored line is the outaged line...
+            for line_key in linedict:                                                               # loop through monitored line keys
+                if line_key == o_key:                                                               # check if monitored line is the outaged line...
                     continue                                                                        # get next monitored line
-                df = dfdict[o_key][lkey]                                                           # get distribution factor for this outage, this line
-                lidx = line_dict[lkey]                                                              # get line index
-                from_bus = xnet.line.loc[lidx, 'from_bus']                                          # get line frombus
+                df = dfdict[o_key][line_key]                                                        # get distribution factor for this outage, this line
+                line_idx = line_dict[line_key]                                                      # get line index
+                from_bus = xnet.line.loc[line_idx, 'from_bus']                                      # get line frombus
                 nom_kv = xnet.bus.loc[from_bus, 'vn_kv']                                            # get line nominal kv
-                max_i_ka = xnet.line.loc[lidx, 'max_i_ka']                                          # get line maximum current
+                max_i_ka = xnet.line.loc[line_idx, 'max_i_ka']                                      # get line maximum current
                 mva_rating = nom_kv * max_i_ka * math.sqrt(3)                                       # calculate line mva rating
-                pre_mw = xnet.res_line.loc[lidx, 'p_from_mw']                                       # get pre-outage branch mw
-                post_mw = abs(pre_mw + (df * branch_mw))                                            # calculate post-outage branch flow
-                loading_pct = 100.0 * post_mw / mva_rating                                          # calculate loading percent
+                pre_mva = xnet.res_line.loc[line_idx, 'p_from_mw']                                  # get pre-outage branch mw
+                mva = abs(pre_mva + (df * branch_mw))                                               # calculate post-outage branch flow
+                loading_pct = 100.0 * mva / mva_rating                                              # calculate loading percent
                 if loading_pct > 100.0:                                                             # if loading greater than 100%...
-                    mva_overloading = mva_rating * (loading_pct - 100.0) / 100.0        # calculate mva overloading
-                    contrained_line_dict[lkey].append([mva_overloading, o_key])                         # add percent overloading and outagekey to dict
+                    i_ka = mva / (nom_kv * math.sqrt(3))                                            # calculate line amps flow
+                    mva_overloading = abs(mva_rating - mva)                                         # calculate mva overloading
+                    i_ka_overloading = abs(max_i_ka - i_ka)                                         # calculate current overloading
+                    constrained_line_dict[line_key].append([mva_overloading, o_key, line_key, i_ka_overloading])  # add mva overloading and outagekey to dict
+
             # -- LOOP ACROSS MONITORED XFMRS ----------------------------------
-            for xkey in xfmrdict:                                                                   # loop through monitored xfmr keys
-                df = dfdict[o_key][xkey]                                                           # get distribution factor for this outage, this xfmr
-                xidx = xfmrdict[xkey]                                                               # get xfmr index
-                mva_rating = xnet.trafo.loc[xidx, 'sn_mva']                                         # get xfmr rating
-                pre_mw = xnet.res_trafo.loc[xidx, 'p_hv_mw']                                        # get pre-outage xfmr mw (high bus)
-                post_mw = abs(pre_mw + (df * branch_mw))                                            # calculate post-outage branch flow
-                loading_pct = 100.0 * post_mw / mva_rating                                          # calculate loading percent
+            for xfmr_key in xfmrdict:                                                               # loop through monitored xfmr keys
+                df = dfdict[o_key][xfmr_key]                                                        # get distribution factor for this outage, this xfmr
+                xfmr_idx = xfmrdict[xfmr_key]                                                       # get xfmr index
+                mva_rating = xnet.trafo.loc[xfmr_idx, 'sn_mva']                                     # get xfmr rating
+                pre_mva = xnet.res_trafo.loc[xfmr_idx, 'p_hv_mw']                                   # get pre-outage xfmr mw (high bus)
+                mva = abs(pre_mva + (df * branch_mw))                                               # calculate post-outage branch flow
+                loading_pct = 100.0 * mva / mva_rating                                              # calculate loading percent
                 if loading_pct > 100.0:                                                             # if loading greater than 100%...
-                    mva_overloading = mva_rating * (loading_pct - 100.0) / 100.0        # calculate mva overloading
-                    contrained_xfmr_dict[xkey].append([mva_overloading, o_key])                         # add percent overloading and outagekey to dict
+                    mva_overloading = abs(mva_rating - mva)                                         # calculate mva overloading
+                    constrained_xfmr_dict[xfmrkey].append([mva_overloading, o_key, xfmr_key, mva])  # add mva overloading and outagekey to dict
 
         # -- CHECK IF OUTAGE IS A TRANSFORMER -----------------------------------------------------
         elif o_key in xfmrdict:                                                                     # check if outage is a xfmr...
-            xidx = xfmrdict[o_key]                                                                  # get outaged line index
-            branch_mw = xnet.res_trafo.loc[xidx, 'p_hv_mw']                                         # get pre-outage xfmr mw (high bus)
+            xfmr_idx = xfmrdict[o_key]                                                              # get outaged line index
+            branch_mw = xnet.res_trafo.loc[xfmr_idx, 'p_hv_mw']                                     # get pre-outage xfmr mw (high bus)
             if branch_mw == 0.0:                                                                    # if pre-outage xfmr flow is zero...
                 continue                                                                            # get the next outaged xfmr
             # -- LOOP ACROSS MONITORED LINES ----------------------------------
-            for lkey in linedict:                                                                   # loop through monitored line keys
-                df = dfdict[o_key][lkey]                                                            # get distribution factor for this outage, this line
-                lidx = line_dict[lkey]                                                              # get line index
-                from_bus = xnet.line.loc[lidx, 'from_bus']                                          # get line frombus
+            for line_key in linedict:                                                               # loop through monitored line keys
+                df = dfdict[o_key][line_key]                                                        # get distribution factor for this outage, this line
+                line_idx = line_dict[line_key]                                                      # get line index
+                from_bus = xnet.line.loc[line_idx, 'from_bus']                                      # get line frombus
                 nom_kv = xnet.bus.loc[from_bus, 'vn_kv']                                            # get line nominal kv
-                max_i_ka = xnet.line.loc[lidx, 'max_i_ka']                                          # get line maximum current
+                max_i_ka = xnet.line.loc[line_idx, 'max_i_ka']                                      # get line maximum current
                 mva_rating = nom_kv * max_i_ka * math.sqrt(3)                                       # calculate line mva rating
-                pre_mw = xnet.res_line.loc[lidx, 'p_from_mw']                                       # get pre-outage branch mw
-                post_mw = abs(pre_mw + (df * branch_mw))                                            # calculate post-outage branch flow
-                loading_pct = 100.0 * post_mw / mva_rating                                          # calculate loading percent
+                pre_mva = xnet.res_line.loc[line_idx, 'p_from_mw']                                  # get pre-outage branch mw
+                mva = abs(pre_mva + (df * branch_mw))                                               # calculate post-outage branch flow
+                loading_pct = 100.0 * mva / mva_rating                                              # calculate loading percent
                 if loading_pct > 100.0:                                                             # if loading greater than 100%...
-                    mva_overloading = mva_rating * (loading_pct - 100.0) / 100.0        # calculate mva overloading
-                    contrained_line_dict[lkey].append([mva_overloading, o_key])                         # add percent overloading and outagekey to dict
+                    i_ka = mva / (nom_kv * math.sqrt(3))                                            # calculate line amps flow
+                    mva_overloading = abs(mva_rating - mva)                                         # calculate mva overloading
+                    i_ka_overloading = abs(max_i_ka - i_ka)                                         # calculate current overloading
+                    constrained_line_dict[line_key].append([mva_overloading, o_key, line_key, i_ka_overloading])  # add mva overloading and outagekey to dict
+
             # -- LOOP ACROSS MONITORED XFMRS ----------------------------------
-            for xkey in xfmrdict:                                                                   # loop through monitored xfmr keys
-                if xkey == o_key:                                                                   # check if monitored xfmr is the outaged xfmr...
+            for xfmr_key in xfmrdict:                                                               # loop through monitored xfmr keys
+                if xfmr_key == o_key:                                                               # check if monitored xfmr is the outaged xfmr...
                     continue                                                                        # get next monitored xfmr
-                df = dfdict[o_key][xkey]                                                           # get distribution factor for this outage, this xfmr
-                xidx = xfmrdict[xkey]                                                               # get xfmr index
-                mva_rating = xnet.trafo.loc[xidx, 'sn_mva']                                         # get xfmr rating
-                pre_mw = xnet.res_trafo.loc[xidx, 'p_hv_mw']                                        # get pre-outage xfmr mw (high bus)
-                post_mw = abs(pre_mw + (df * branch_mw))                                            # calculate post-outage branch flow
-                loading_pct = 100.0 * post_mw / mva_rating                                          # calculate loading percent
+                df = dfdict[o_key][xfmr_key]                                                        # get distribution factor for this outage, this xfmr
+                xfmr_idx = xfmrdict[xfmr_key]                                                       # get xfmr index
+                mva_rating = xnet.trafo.loc[xfmr_idx, 'sn_mva']                                     # get xfmr rating
+                pre_mva = xnet.res_trafo.loc[xfmr_idx, 'p_hv_mw']                                   # get pre-outage xfmr mw (high bus)
+                mva = abs(pre_mva + (df * branch_mw))                                               # calculate post-outage branch flow
+                loading_pct = 100.0 * mva / mva_rating                                              # calculate loading percent
                 if loading_pct > 100.0:                                                             # if loading greater than 100%...
-                    mva_overloading = mva_rating * (loading_pct - 100.0) / 100.0        # calculate mva overloading
-                    contrained_xfmr_dict[xkey].append([mva_overloading, o_key])                         # add percent overloading and outagekey to dict
+                    mva_overloading = abs(mva_rating - mva)                                         # calculate mva overloading
+                    constrained_xfmr_dict[xfmrkey].append([mva_overloading, o_key, xfmr_key, mva])  # add mva overloading and outagekey to dict
 
     # -- REMOVE EMPTY DICT LISTS AND SORT REMAINING DICT LISTS ------------------------------------
     tempdict = {}                                                                                   # initialize tempdict
-    for lkey in contrained_line_dict:                                                               # loop across constrained line dict
-        if contrained_line_dict[lkey]:                                                              # if dict list value is not empty...
-            contrained_line_dict[lkey].sort(reverse=True)                                           # sort list and add to tempdict
-            tempdict.update({lkey: contrained_line_dict[lkey][0]})                                  # add key:[list] to tempdict
-    contrained_line_dict = tempdict                                                                 # reassign dict
+    for lkey in constrained_line_dict:                                                              # loop across constrained line dict
+        if constrained_line_dict[lkey]:                                                             # if dict list value is not empty...
+            constrained_line_dict[lkey].sort(reverse=True)                                          # sort list and add to tempdict
+            tempdict.update({lkey: constrained_line_dict[lkey][0]})                                 # add key:[list] to tempdict
+    constrained_line_dict = tempdict                                                                # reassign dict
 
     # -- REMOVE EMPTY DICT LISTS AND SORT REMAINING DICT LISTS ------------------------------------
     tempdict = {}                                                                                   # initialize tempdict
-    for xkey in contrained_xfmr_dict:                                                               # loop across constrained xfmr dict
-        if contrained_xfmr_dict[xkey]:                                                              # if dict list value is not empty...
-            contrained_xfmr_dict[xkey].sort(reverse=True)                                           # sort list and add to tempdict
-            tempdict.update({xkey: contrained_xfmr_dict[xkey][0]})                                  # add key:[list] to tempdict
-    contrained_xfmr_dict = tempdict                                                                 # reassign dict
+    for xkey in constrained_xfmr_dict:                                                              # loop across constrained xfmr dict
+        if constrained_xfmr_dict[xkey]:                                                             # if dict list value is not empty...
+            constrained_xfmr_dict[xkey].sort(reverse=True)                                          # sort list and add to tempdict
+            tempdict.update({xkey: constrained_xfmr_dict[xkey][0]})                                 # add key:[list] to tempdict
+    constrained_xfmr_dict = tempdict                                                                # reassign dict
 
     # -- CREATE LIST OF DOMINANT OUTAGES -----------------------------------------------------------
-    dominantoutages = []                                                                            # initialize list
-    for lkey in contrained_line_dict:                                                               # loop across constrained line dict
-        dominantoutages.append(contrained_line_dict[lkey])                                          # add [maxloading, outagekey] fot list
-    for xkey in contrained_xfmr_dict:                                                               # loop across constrained xfmr dict
-        dominantoutages.append(contrained_xfmr_dict[xkey])                                          # add [maxloading, outagekey] fot list
-    dominantoutages.sort(reverse=True)                                                              # sort list high-low
+    dominant_outages = []                                                                           # initialize list
+    for lkey in constrained_line_dict:                                                              # loop across constrained line dict
+        dominant_outages.append(constrained_line_dict[lkey])                                        # add [maxloading, outagekey] fot list
+    for xkey in constrained_xfmr_dict:                                                              # loop across constrained xfmr dict
+        dominant_outages.append(constrained_xfmr_dict[xkey])                                        # add [maxloading, outagekey] fot list
+    dominant_outages.sort(reverse=True)                                                             # sort list high-low
 
+    # -- SEPARATE INTO DOMINANT OUTAGES,BRANCHS,OVERLOADS -----------------------------------------
     templist = []                                                                                   # initialize list
-    overloadlist = []                                                                               # initialize list
-    for outage in dominantoutages:                                                                  # loop across dominant outages list
+    dominant_mva_overloads = []                                                                     # initialize list
+    dominant_branches = []                                                                          # initialize list
+    dominant_ika_mva_overloads = []                                                                 # initialize list
+    for outage in dominant_outages:                                                                 # loop across dominant outages list
         if outage[1] not in templist:                                                               # check if outagekey not in the list...
-            overloadlist.append(round(outage[0], 1))                                                # add overloading to list
+            dominant_mva_overloads.append(round(outage[0], 1))                                      # add mva overloading to list
+            dominant_branches.append(outage[2])                                                     # add branch to list
+            dominant_ika_mva_overloads.append(outage[3])                                            # add current (or mva) overloading to list
             templist.append(outage[1])                                                              # add outgagekey to templist
-    dominantoutages = templist                                                                      # reassign list
-    totaloverloading = sum(overloadlist)
+    dominant_outages = templist                                                                     # reassign list
+    totaloverloading = sum(dominant_mva_overloads)
 
-    if swinggen_in_outages:
-        dominantoutages = [swinggen_key]
-        totaloverloading = 999.9
-        print('DOMINANT OUTAGES{0:d} ({1:d})'.format(iteration, 1), [swinggen_key], '<-- SWING GENERATOR IN OUTAGES... RUN IT FIRST')
-    # elif nosolvekeys:
-    #     print('DOMINANT OUTAGES{0:d} ({1:d})'.format(iteration, len(overloadlist)), dominantoutages, overloadlist, '({0:.1f} MVA)'.format(totaloverloading), 'NOSOLVES:', nosolvekeys)
-    else:
-        print('DOMINANT OUTAGES{0:d} ({1:d})'.format(iteration, len(overloadlist)), dominantoutages, overloadlist, '({0:.1f} MVA)'.format(totaloverloading))
-    return dominantoutages, totaloverloading
+    # -- GET WORST DOMINANT OUTAGE,BRANCH,OVERLOAD (AND REDUCE BRANCH RATING) ---------------------
+    if dominant_outages:                                                                            # if list not empty
+        dominant_outage = dominant_outages[0]                                                       # get worst dominant outage
+        dominant_branch = dominant_branches[0]                                                      # get worst loaded branch
+        dominant_ika_mva_overload = dominant_ika_mva_overloads[0]                                   # get the amount of overload
+        if dominant_branch in line_dict:                                                            # if branch is a line...
+            lidx = line_dict[dominant_branch]                                                       # get line index
+            xnet.line.loc[lidx, 'max_i_ka'] -= dominant_ika_mva_overload                            # reduce the max rating by how much it is overloaded
+        if dominant_branch in xfmr_dict:                                                            # if branch is a xfmr...
+            xidx = xfmr_dict[dominant_branch]                                                       # get xfmr index
+            xnet.trafo.loc[xidx, 'sn_mva'] -= dominant_ika_mva_overload                             # reduce the max rating by how much it is overloaded
+
+    print()
+    print('{0:<2d}DOMINANT OUTAGES'.format(iteration), dominant_outages)
+    print('   LOADED BRANCHES', dominant_branches)
+    print('  LOADING OVER MAX', dominant_mva_overloads, '({0:.1f} MVA)'.format(totaloverloading))
+
+    return xnet, dominant_outages, totaloverloading
 
 
-def get_dominant_outages2(xnet, outagekeys, onlinegens, gendict, linedict, xfmrdict, swinggendict, iteration):
+def get_dominant_outages(xnet, outagekeys, onlinegens, gendict, linedict, xfmrdict, iteration):
     """get dominant outages resulting in branch loading"""
 
     nosolve_keys = []
-    swinggen_in_outages = False
-    swinggen_key = ''
     constrained_line_dict = {}                                                                       # initialize dict
     constrained_xfmr_dict = {}                                                                       # initialize dict
     for line_key in line_dict:                                                                      # loop through lines
@@ -392,10 +412,6 @@ def get_dominant_outages2(xnet, outagekeys, onlinegens, gendict, linedict, xfmrd
         if o_key in onlinegens:                                                                     # check if a generator...
             g_idx = gendict[o_key]                                                                  # get generator index
             net.gen.in_service[g_idx] = False                                                       # switch off outaged generator
-            if o_key in swinggendict and len(swinggendict) == 1 and iteration == 0:
-                swinggen_in_outages = True
-                swinggen_key = o_key
-                break
         elif o_key in linedict:                                                                     # check if a line...
             line_idx = linedict[o_key]                                                              # get line index
             net.line.in_service[line_idx] = False                                                   # switch out outaged line
@@ -418,7 +434,8 @@ def get_dominant_outages2(xnet, outagekeys, onlinegens, gendict, linedict, xfmrd
                 mva_rating = nom_kv * max_i_ka * math.sqrt(3)                                       # calculate line mva rating
                 mva = loading_pct * mva_rating / 100.0                                              # calculate mva flow
                 mva_overloading = abs(mva_rating - mva)                                             # calculate mva overloading
-                constrained_line_dict[line_key].append([mva_overloading, o_key, line_key, i_ka])    # add mva overloading and outagekey to dict
+                i_ka_overloading = abs(max_i_ka - i_ka)                                             # calculate current overloading
+                constrained_line_dict[line_key].append([mva_overloading, o_key, line_key, i_ka_overloading])    # add mva overloading and outagekey to dict
 
         for xfmr_key in xfmrdict:                                                                   # loop across xfmr keys
             xfmr_idx = xfmrdict[xfmr_key]                                                           # get xfmr index
@@ -429,62 +446,66 @@ def get_dominant_outages2(xnet, outagekeys, onlinegens, gendict, linedict, xfmrd
                 mva_overloading = abs(mva_rating - mva)                                             # calculate mva overloading
                 constrained_xfmr_dict[xfmrkey].append([mva_overloading, o_key, xfmr_key, mva])      # add mva overloading and outagekey to dict
 
-    tempdict = {}                                                                                       # initialize tempdict
-    for lkey in constrained_line_dict:                                                               # loop across constrained line dict
-        if constrained_line_dict[lkey]:                                                              # if dict list value is not empty...
-            constrained_line_dict[lkey].sort(reverse=True)                                           # sort list and add to tempdict
-            tempdict.update({lkey: constrained_line_dict[lkey][0]})                                  # add key:[list] to tempdict
-    constrained_line_dict = tempdict                                                                 # reassign dict
-
+    # -- REMOVE EMPTY DICT LISTS AND SORT REMAINING DICT LISTS ------------------------------------
     tempdict = {}                                                                                   # initialize tempdict
-    for xkey in constrained_xfmr_dict:                                                               # loop across constrained xfmr dict
-        if constrained_xfmr_dict[xkey]:                                                              # if dict list value is not empty...
-            constrained_xfmr_dict[xkey].sort(reverse=True)                                           # sort list and add to tempdict
-            tempdict.update({xkey: constrained_xfmr_dict[xkey][0]})                                  # add key:[list] to tempdict
-    constrained_xfmr_dict = tempdict                                                                 # reassign dict
-    dominant_outages = []                                                                            # initialize list
-    for lkey in constrained_line_dict:                                                               # loop across constrained line dict
-        dominant_outages.append(constrained_line_dict[lkey])                                          # add [maxloading, outagekey] fot list
-    for xkey in constrained_xfmr_dict:                                                               # loop across constrained xfmr dict
-        dominant_outages.append(constrained_xfmr_dict[xkey])                                          # add [maxloading, outagekey] fot list
-    dominant_outages.sort(reverse=True)                                                              # sort list high-low
+    for lkey in constrained_line_dict:                                                              # loop across constrained line dict
+        if constrained_line_dict[lkey]:                                                             # if dict list value is not empty...
+            constrained_line_dict[lkey].sort(reverse=True)                                          # sort list and add to tempdict
+            tempdict.update({lkey: constrained_line_dict[lkey][0]})                                 # add key:[list] to tempdict
+    constrained_line_dict = tempdict                                                                # reassign dict
 
+    # -- REMOVE EMPTY DICT LISTS AND SORT REMAINING DICT LISTS ------------------------------------
+    tempdict = {}                                                                                   # initialize tempdict
+    for xkey in constrained_xfmr_dict:                                                              # loop across constrained xfmr dict
+        if constrained_xfmr_dict[xkey]:                                                             # if dict list value is not empty...
+            constrained_xfmr_dict[xkey].sort(reverse=True)                                          # sort list and add to tempdict
+            tempdict.update({xkey: constrained_xfmr_dict[xkey][0]})                                 # add key:[list] to tempdict
+    constrained_xfmr_dict = tempdict                                                                # reassign dict
+
+    # -- CREATE LIST OF DOMINANT OUTAGES -----------------------------------------------------------
+    dominant_outages = []                                                                           # initialize list
+    for lkey in constrained_line_dict:                                                              # loop across constrained line dict
+        dominant_outages.append(constrained_line_dict[lkey])                                        # add [maxloading, outagekey] fot list
+    for xkey in constrained_xfmr_dict:                                                              # loop across constrained xfmr dict
+        dominant_outages.append(constrained_xfmr_dict[xkey])                                        # add [maxloading, outagekey] fot list
+    dominant_outages.sort(reverse=True)                                                             # sort list high-low
+
+    # -- SEPARATE INTO DOMINANT OUTAGES,BRANCHS,OVERLOADS -----------------------------------------
     templist = []                                                                                   # initialize list
-    dominant_overloads = []                                                                               # initialize list
-    dominant_branches = []
-    for outage in dominant_outages:                                                                  # loop across dominant outages list
+    dominant_mva_overloads = []                                                                     # initialize list
+    dominant_branches = []                                                                          # initialize list
+    dominant_ika_mva_overloads = []                                                                 # initialize list
+    for outage in dominant_outages:                                                                 # loop across dominant outages list
         if outage[1] not in templist:                                                               # check if outagekey not in the list...
-            dominant_overloads.append(round(outage[0], 1))                                                # add overloading to list
+            dominant_mva_overloads.append(round(outage[0], 1))                                      # add mva overloading to list
+            dominant_branches.append(outage[2])                                                     # add branch to list
+            dominant_ika_mva_overloads.append(outage[3])                                            # add current (or mva) overloading to list
             templist.append(outage[1])                                                              # add outgagekey to templist
-            dominant_branches.append(outage[2])
-    dominant_outages = templist                                                                      # reassign list
-    totaloverloading = sum(dominant_overloads)
+    dominant_outages = templist                                                                     # reassign list
+    totaloverloading = sum(dominant_mva_overloads)
 
-    if dominant_outages:
-        dominant_outage = dominant_outages[0]
-        dominant_branch = dominant_branches[0]
-        dominant_overload = dominant_overloads[0]
-        if dominant_branch in line_dict:
-            lidx = line_dict[dominant_branch]
-            xnet.line.loc[lidx, 'max_i_ka'] -= dominant_overload
-        if dominant_branch in xfmr_dict:
-            xidx = xfmr_dict[dominant_branch]
-            xnet.trafo.loc[xidx, 'sn_mva'] -= dominant_overload
+    # -- GET WORST DOMINANT OUTAGE,BRANCH,OVERLOAD (AND REDUCE BRANCH RATING) ---------------------
+    if dominant_outages:                                                                            # if list not empty
+        dominant_outage = dominant_outages[0]                                                       # get worst dominant outage
+        dominant_branch = dominant_branches[0]                                                      # get worst loaded branch
+        dominant_ika_mva_overload = dominant_ika_mva_overloads[0]                                   # get the amount of overload
+        if dominant_branch in line_dict:                                                            # if branch is a line...
+            lidx = line_dict[dominant_branch]                                                       # get line index
+            xnet.line.loc[lidx, 'max_i_ka'] -= dominant_ika_mva_overload                            # reduce the max rating by how much it is overloaded
+        if dominant_branch in xfmr_dict:                                                            # if branch is a xfmr...
+            xidx = xfmr_dict[dominant_branch]                                                       # get xfmr index
+            xnet.trafo.loc[xidx, 'sn_mva'] -= dominant_ika_mva_overload                             # reduce the max rating by how much it is overloaded
 
-    if swinggen_in_outages and iteration == 0:
-        dominant_outages = [swinggen_key]
-        totaloverloading = 999.9
-        print('DOMINANT OUTAGES{0:d} ({1:d})'.format(iteration, 1), [swinggen_key], '<-- SWING GENERATOR IN OUTAGES... RUN IT FIRST')
-    elif nosolve_keys:
+    if nosolve_keys:
         print()
         print('{0:<2d}DOMINANT OUTAGES'.format(iteration), dominant_outages, 'NOSOLVES:', nosolve_keys)
         print('   LOADED BRANCHES', dominant_branches)
-        print('  LOADING OVER MAX', dominant_overloads, '({0:.1f} MVA)'.format(totaloverloading))
+        print('  LOADING OVER MAX', dominant_mva_overloads, '({0:.1f} MVA)'.format(totaloverloading))
     else:
         print()
         print('{0:<2d}DOMINANT OUTAGES'.format(iteration), dominant_outages)
         print('   LOADED BRANCHES', dominant_branches)
-        print('  LOADING OVER MAX', dominant_overloads, '({0:.1f} MVA)'.format(totaloverloading))
+        print('  LOADING OVER MAX', dominant_mva_overloads, '({0:.1f} MVA)'.format(totaloverloading))
 
     return xnet, dominant_outages, totaloverloading
 
@@ -548,6 +569,7 @@ def get_minmax_voltage(xnet):
 def get_df_dict(xnet, goutage_keys, boutage_keys, gendict, linedict, xfmrdict, swinggendict):
     """calculate generator and branch outage distribution factors"""
     df_dict = {}                                                                                    # declare distribution factor dict
+    df_scale = 1.01
     pp.runpp(xnet, enforce_q_lims=True)                                                             # run powerflow on basecase
     for gkey in goutage_keys:                                                                       # loop through generator outage keys
         df_dict.update({gkey: {}})                                                                  # initialize distribution factor dict of dicts
@@ -560,14 +582,6 @@ def get_df_dict(xnet, goutage_keys, boutage_keys, gendict, linedict, xfmrdict, s
         gidx = gendict[gkey]                                                                        # get generator index to outage
         pgen = xnet.res_gen.loc[gidx, 'p_mw']                                                       # get pre-outage generator mw
         net.gen.in_service[gidx] = False                                                            # switch off outaged generator
-
-        # if gkey in swinggendict and len(swinggendict) == 1:
-        #     print('   RUNNING OPF ON SWING GENERATOR OUTAGE ...........................')
-        #     try:                                                                                               # TRY OPF POWERFLOW SOLUTION
-        #         pp.runopp(net, init='pf')                                                                      # RUN OPF ON THIS NETWORK
-        #         net = copy_opf_to_network(net, net, gen_dict, genbus_dict, swingbus, swsh_dict, swshbus_dict)  # COPY OPF RESULTS TO THIS NETWORK
-        #     except:                                                                                            # IF NO SOLUTION...
-        #         print('   SWING GEN OUTAGE DID NOT SOLVE WITH OPF .........................', gkey)            # PRINT NOSOLVE MESSAGE
         try:                                                                                        # try to run powerflow on outage
             pp.runpp(net, enforce_q_lims=True)                                                      # run powerflow on outage
         except:                                                                                     # try to run powerflow again
@@ -587,7 +601,7 @@ def get_df_dict(xnet, goutage_keys, boutage_keys, gendict, linedict, xfmrdict, s
             lidx = linedict[lkey]                                                                   # get line index
             pre_mw = xnet.res_line.loc[lidx, 'p_from_mw']                                           # get pre-outage line mw (from bus)
             post_mw = net.res_line.loc[lidx, 'p_from_mw']                                           # get post-outage line mw (from bus)
-            df = (post_mw - pre_mw) / pgen                                                          # calculate distribution factor for this outage, this branch
+            df = df_scale * (post_mw - pre_mw) / pgen                                                          # calculate distribution factor for this outage, this branch
             if df < -1.0:                                                                           # limit distribution factors to +- 1.0
                 df = -1.0                                                                           #
             elif df > 1.0:                                                                          #
@@ -597,7 +611,7 @@ def get_df_dict(xnet, goutage_keys, boutage_keys, gendict, linedict, xfmrdict, s
             xidx = xfmrdict[xkey]                                                                   # get xfmr index
             pre_mw = xnet.res_trafo.loc[xidx, 'p_hv_mw']                                            # get pre-outage xfmr mw (high bus)
             post_mw = net.res_trafo.loc[xidx, 'p_hv_mw']                                            # get post-outage xfmr mw (high bus)
-            df = (post_mw - pre_mw) / pgen                                                          # calculate distribution factor for this outage, this branch
+            df = df_scale * (post_mw - pre_mw) / pgen                                                          # calculate distribution factor for this outage, this branch
             if df < -1.0:                                                                           # limit distribution factors to +- 1.0
                 df = -1.0                                                                           #
             elif df > 1.0:                                                                          #
@@ -640,7 +654,7 @@ def get_df_dict(xnet, goutage_keys, boutage_keys, gendict, linedict, xfmrdict, s
             lidx = linedict[lkey]                                                                   # get line index
             pre_mw = xnet.res_line.loc[lidx, 'p_from_mw']                                           # get pre-outage line mw (from bus)
             post_mw = net.res_line.loc[lidx, 'p_from_mw']                                           # get post-outage line mw (from bus)
-            df = (post_mw - pre_mw) / branch_mw                                                     # calculate distribution factor for this outage, this branch
+            df = df_scale * (post_mw - pre_mw) / branch_mw                                                     # calculate distribution factor for this outage, this branch
             if df < -1.0:                                                                           # limit distribution factors to +- 1.0
                 df = -1.0                                                                           #
             elif df > 1.0:                                                                          #
@@ -652,24 +666,12 @@ def get_df_dict(xnet, goutage_keys, boutage_keys, gendict, linedict, xfmrdict, s
             xidx = xfmrdict[xkey]                                                                   # get line index
             pre_mw = xnet.res_trafo.loc[xidx, 'p_hv_mw']                                            # get pre-outage xfmr mw (high bus)
             post_mw = net.res_trafo.loc[xidx, 'p_hv_mw']                                            # get post-outage xfmr mw (high bus)
-            df = (post_mw - pre_mw) / branch_mw                                                     # calculate distribution factor for this outage, this branch
+            df = df_scale * (post_mw - pre_mw) / branch_mw                                                     # calculate distribution factor for this outage, this branch
             if df < -1.0:                                                                           # limit distribution factors to +- 1.0
                 df = -1.0                                                                           #
             elif df > 1.0:                                                                          #
                 df = 1.0                                                                            #
             df_dict[bkey].update({xkey: df})                                                        # update distribution factor dict of dicts
-
-    # mindf = 0.0
-    # maxdf = 0.0
-    # for okey in df_dict:
-    #     for bkey in df_dict[okey]:
-    #         # print(okey, bkey, df_dict[okey][bkey])
-    #         if df_dict[okey][bkey] < mindf:
-    #             mindf = df_dict[okey][bkey]
-    #             print('   RUNNING MIN DF ..................................................', round(mindf, 5))
-    #         if df_dict[okey][bkey] > maxdf:
-    #             maxdf = df_dict[okey][bkey]
-    #             print('   RUNNING MAX DF .................................................. ', round(maxdf, 5))
     return df_dict
 
 
@@ -680,10 +682,13 @@ def print_dataframes_results(_net):                                             
     pdoptions.display.max_colwidth = 100
     pdoptions.display.width = None
     pdoptions.display.precision = 6
-    # print()
-    # print('BUS DATAFRAME')
-    # print(_net.bus)
-    # print()
+    print()
+    print('BUS DATAFRAME')
+    print(_net.bus)
+    print()
+    print('BUS RESULTS')
+    print(_net.res_bus)
+    print()
     # print('LOAD DATAFRAME')
     # print(_net.load)
     # print()
@@ -870,8 +875,8 @@ if __name__ == "__main__":
             pp.create_sgen(net_a, loadbus, p_mw=-loadp, q_mvar=-loadq, sn_mva=loadmva, name=loadname)
             pp.create_sgen(net_c, loadbus, p_mw=-loadp, q_mvar=-loadq, sn_mva=loadmva, name=loadname)
         else:
-            pp.create_load(net_a, bus=loadbus, p_mw=loadp, q_mvar=loadq, sn_mva=loadmva, name=loadname)
-            pp.create_load(net_c, bus=loadbus, p_mw=loadp, q_mvar=loadq, sn_mva=loadmva, name=loadname)
+            pp.create_load(net_a, bus=loadbus, p_mw=loadp, q_mvar=loadq, sn_mva=loadmva, name=loadname, controllable=False)
+            pp.create_load(net_c, bus=loadbus, p_mw=loadp, q_mvar=loadq, sn_mva=loadmva, name=loadname, controllable=False)
 
     # == ADD GENERATORS TO NETWORK ================================================================
     print('ADD GENERATORS .....................................................')
@@ -914,27 +919,26 @@ if __name__ == "__main__":
             qgen = 0.0
         nomkv = busnomkv_dict[genbus]
         genmva = math.sqrt(pmax ** 2 + qmax ** 2)
-        power_factor = pmax / genmva
         if genkey in pwlcost_dict:
             pcostdata = pwlcost_dict[genkey]
             # -- BASE NETWORK ---------------------------------------------------------------------
             idx = pp.create_gen(net_a, genbus, pgen, vm_pu=vreg, sn_mva=genmva, name=genkey, max_p_mw=pmax, min_p_mw=pmin,  max_q_mvar=qmax, min_q_mvar=qmin,
-                                rdss_pu=0.005, xdss_pu=0.25, cos_phi=power_factor, vn_kv=nomkv, type='SWGEN', controllable=True, in_service=status)
+                                rdss_pu=0.005, xdss_pu=0.25, vn_kv=nomkv, type='SWGEN', controllable=True, in_service=status)
             pp.create_pwl_cost(net_a, idx, 'gen', pcostdata)
             # -- CONTINGENCY NETWORK --------------------------------------------------------------
             pp.create_gen(net_c, genbus, pgen, vm_pu=vreg, sn_mva=genmva, name=genkey, max_p_mw=pmax, min_p_mw=pmin,  max_q_mvar=qmax, min_q_mvar=qmin,
-                          rdss_pu=0.005, xdss_pu=0.25,  cos_phi=power_factor, vn_kv=nomkv, type='SWGEN', controllable=True, in_service=status, index=idx, slack=False)
+                          rdss_pu=0.005, xdss_pu=0.25, vn_kv=nomkv, type='SWGEN', controllable=True, in_service=status, index=idx, slack=False)
             pp.create_pwl_cost(net_c, idx, 'gen', pcostdata)
-            if status:
+            if status and pmax > 0.0:
                 participating_gens.append(genkey)
                 area_participating_gens[busarea_dict[genbus]].append(genkey)
         else:
             # -- BASE NETWORK ---------------------------------------------------------------------
             idx = pp.create_gen(net_a, genbus, pgen, vm_pu=vreg, sn_mva=genmva, name=genkey, max_p_mw=pmax, min_p_mw=pmin,  max_q_mvar=qmax, min_q_mvar=qmin,
-                                rdss_pu=0.005, xdss_pu=0.25, cos_phi=power_factor, vn_kv=nomkv, type='SWGEN', controllable=False, in_service=status)
+                                rdss_pu=0.005, xdss_pu=0.25, vn_kv=nomkv, type='SWGEN', controllable=False, in_service=status)
             # -- CONTINGENCY NETWORK --------------------------------------------------------------
             pp.create_gen(net_c, genbus, pgen, vm_pu=vreg, sn_mva=genmva, name=genkey, max_p_mw=pmax, min_p_mw=pmin,  max_q_mvar=qmax, min_q_mvar=qmin,
-                          rdss_pu=0.005, xdss_pu=0.25, cos_phi=power_factor, vn_kv=nomkv,  type='SWGEN', controllable=False, in_service=status, index=idx)
+                          rdss_pu=0.005, xdss_pu=0.25, vn_kv=nomkv,  type='SWGEN', controllable=False, in_service=status, index=idx)
         swing_vreg = vreg
         swinggen_dict.update({genkey: idx})
         gen_dict.update({genkey: idx})
@@ -944,7 +948,7 @@ if __name__ == "__main__":
         genidxs.append(idx)
         genbus_dict.update({idx: genbus})
         gen_minmax_dict.update({genkey: [pmin, pmax]})
-        if status:
+        if status and pmax > 0.0:
             online_gens.append(genkey)
         if pgen == 0.0:
             zero_gens.append(genkey)
@@ -973,7 +977,6 @@ if __name__ == "__main__":
         vreg = gen.vs
         nomkv = busnomkv_dict[genbus]
         genmva = math.sqrt(pmax ** 2 + qmax ** 2)
-        power_factor = pmax / genmva
         if GVREG:
             vreg = Gvreg_Custom
         status = bool(gen.stat)
@@ -986,22 +989,22 @@ if __name__ == "__main__":
             pcostdata = pwlcost_dict[genkey]
             # -- BASE NETWORK ---------------------------------------------------------------------
             idx = pp.create_gen(net_a, genbus, pgen, vm_pu=vreg, sn_mva=genmva, name=genkey, max_p_mw=pmax, min_p_mw=pmin, max_q_mvar=qmax, min_q_mvar=qmin,
-                                rdss_pu=0.005, xdss_pu=0.25, cos_phi=power_factor, vn_kv=nomkv, type='GEN', controllable=True, in_service=status)
+                                rdss_pu=0.005, xdss_pu=0.25, vn_kv=nomkv, type='GEN', controllable=True, in_service=status)
             pp.create_pwl_cost(net_a, idx, 'gen', pcostdata)
             # -- CONTINGENCY NETWORK --------------------------------------------------------------
             pp.create_gen(net_c, genbus, pgen, vm_pu=vreg, sn_mva=genmva, name=genkey, max_p_mw=pmax, min_p_mw=pmin, max_q_mvar=qmax, min_q_mvar=qmin,
-                          rdss_pu=0.005, xdss_pu=0.25, cos_phi=power_factor, vn_kv=nomkv,  type='GEN', controllable=True, in_service=status, index=idx)
+                          rdss_pu=0.005, xdss_pu=0.25, vn_kv=nomkv,  type='GEN', controllable=True, in_service=status, index=idx)
             pp.create_pwl_cost(net_c, idx, 'gen', pcostdata)
-            if status:
+            if status and pmax > 0.0:
                 participating_gens.append(genkey)
                 area_participating_gens[busarea_dict[genbus]].append(genkey)
         else:
             # -- BASE NETWORK ---------------------------------------------------------------------
             idx = pp.create_gen(net_a, genbus, pgen, vm_pu=vreg, name=genkey, max_p_mw=pmax, min_p_mw=pmin, max_q_mvar=qmax, min_q_mvar=qmin,
-                                rdss_pu=0.005, xdss_pu=0.25, cos_phi=power_factor, vn_kv=nomkv,  type='GEN', controllable=False, in_service=status)
+                                rdss_pu=0.005, xdss_pu=0.25, vn_kv=nomkv,  type='GEN', controllable=False, in_service=status)
             # -- CONTINGENCY NETWORK --------------------------------------------------------------
             pp.create_gen(net_c, genbus, pgen, vm_pu=vreg, name=genkey, max_p_mw=pmax, min_p_mw=pmin, max_q_mvar=qmax, min_q_mvar=qmin,
-                          rdss_pu=0.005, xdss_pu=0.25, cos_phi=power_factor, vn_kv=nomkv,  type='GEN', controllable=False, in_service=status, index=idx)
+                          rdss_pu=0.005, xdss_pu=0.25, vn_kv=nomkv,  type='GEN', controllable=False, in_service=status, index=idx)
         Gids.append("'" + gid + "'")
         genbuses.append(genbus)
         genarea_dict.update({genkey: busarea_dict[genbus]})
@@ -1009,7 +1012,7 @@ if __name__ == "__main__":
         gen_dict.update({genkey: idx})
         genbus_dict.update({idx: genbus})
         gen_minmax_dict.update({genkey: [pmin, pmax]})
-        if status:
+        if status and pmax > 0.0:
             online_gens.append(genkey)
         if pgen == 0.0:
             zero_gens.append(genkey)
@@ -1092,10 +1095,10 @@ if __name__ == "__main__":
             shuntmva = math.sqrt(pmax ** 2 + total_qmax ** 2)
             # -- BASE NETWORK ---------------------------------------------------------------------
             idx = pp.create_gen(net_a, shuntbus, pgen, vm_pu=vreg, sn_mva=shuntmva, max_p_mw=pmax, min_p_mw=pmin, max_q_mvar=total_qmax, min_q_mvar=total_qmin,
-                                rdss_pu=99.99, xdss_pu=99.99, cos_phi=1e-6, vn_kv=nomkv, controllable=True, name=swshkey, type='SWSH')
+                                rdss_pu=99.99, xdss_pu=99.99, vn_kv=nomkv, controllable=True, name=swshkey, type='SWSH')
             # -- CONTINGENCY NETWORK --------------------------------------------------------------
             pp.create_gen(net_c, shuntbus, pgen, vm_pu=vreg, sn_mva=shuntmva, max_p_mw=pmax, min_p_mw=pmin, max_q_mvar=total_qmax, min_q_mvar=total_qmin,
-                          rdss_pu=99.9, xdss_pu=99.99, cos_phi=1e-6, vn_kv=nomkv, controllable=True, name=swshkey, type='SWSH', index=idx)
+                          rdss_pu=99.9, xdss_pu=99.99, vn_kv=nomkv, controllable=True, name=swshkey, type='SWSH', index=idx)
             swshidx_dict.update({shuntbus: idx})
             swshidxs.append(idx)
             swsh_dict.update({swshkey: idx})
@@ -1106,7 +1109,8 @@ if __name__ == "__main__":
     # line = (line.i, line.j, line.ckt, line.r, line.x, line.b, line.ratea, line.ratec, line.st, line.len, line.met)
     line_dict = {}
     lineidxs = []
-    branch_areas = {}
+    # branch_areas = {}
+    zero_branches = []
     print('ADD LINES ..........................................................')
     for line in raw_data.raw.nontransformer_branches.values():
         frombus = line.i
@@ -1136,7 +1140,9 @@ if __name__ == "__main__":
         pp.create_line_from_parameters(net_c, frombus, tobus, length, r, x, capacitance, i_rating_c, name=linekey, max_loading_percent=MaxLoading, in_service=status, index=idx)
         line_dict.update({linekey: idx})
         lineidxs.append(idx)
-        branch_areas.update({linekey: [busarea_dict[frombus], busarea_dict[tobus]]})
+        # branch_areas.update({linekey: [busarea_dict[frombus], busarea_dict[tobus]]})
+        if not status:
+            zero_branches.append(linekey)
 
     # == ADD 2W TRANSFORMERS TO NETWORK ===========================================================
     # 2wxfmr = (xfmr.i, xfmr.j, xfmr.ckt, xfmr.mag1, xfmr.mag2, xfmr.r12, xfmr.x12, xfmr.windv1, xfmr.nomv1,
@@ -1219,9 +1225,12 @@ if __name__ == "__main__":
         xfmr_ratea_dict.update({xfmrkey: xfmr.rata1})
         xfmr_ratec_dict.update({xfmrkey: xfmr.ratc1})
         xfmridxs.append(idx)
-        branch_areas.update({xfmrkey: [busarea_dict[highbus], busarea_dict[lowbus]]})
-    for bkey in branch_areas:
-        branch_areas[bkey] = list(set(branch_areas[bkey]))
+        # branch_areas.update({xfmrkey: [busarea_dict[highbus], busarea_dict[lowbus]]})
+        if not status:
+            zero_branches.append(xfmrkey)
+
+    # for bkey in branch_areas:
+    #     branch_areas[bkey] = list(set(branch_areas[bkey]))
 
     # == ADD EXTERNAL GRID ========================================================================
     # == WITH DUMMY TIE TO RAW SWING BUS ==========================================================
@@ -1246,6 +1255,12 @@ if __name__ == "__main__":
     # -- NETWORKS CREATED -------------------------------------------------------------------------
     # =============================================================================================
     print('   NETWORKS CREATED ................................................', round(time.time() - create_starttime, 3), 'sec')
+    NumBuses = len(busidxs)
+    goutagekeys = list(outage_dict['gen'].keys())                                                   # GET OUTAGED GENERATOR KEYS
+    boutagekeys = list(outage_dict['branch'].keys())                                                # GET OUTAGED BRANCH KEYS
+    NumOutages_0 = len(goutagekeys) + len(boutagekeys)
+    NumOutages_1 = int(NumOutages_0)
+    NumOutages_2 = int(NumOutages_0)
 
     # == SOLVE NETWORK WITH POWERFLOW =============================================================
     solve_starttime = time.time()                                                                   # INITIALIZE START-TIME
@@ -1254,33 +1269,21 @@ if __name__ == "__main__":
 
     # == SOLVE NETWORK WITH OPF ===================================================================
     solve_starttime = time.time()                                                                        # INITIALIZE START-TIME
+    # pp.rundcopp(net_a)                                                                          # RUN OPF ON THIS NETWORK
+    # net_a = copy_dcopf_to_network(net_a, net_a)  # COPY OPF RESULTS TO THIS NETWORK
+
     pp.runopp(net_a, init='pf')                                                                          # RUN OPF ON THIS NETWORK
     net_a = copy_opf_to_network(net_a, net_a, gen_dict, genbus_dict, swingbus, swsh_dict, swshbus_dict)  # COPY OPF RESULTS TO THIS NETWORK
     pp.runpp(net_a, enforce_q_lims=True)                                                                 # RUN POWERFLOW
     print('   OPTIMAL POWERFLOW SOLVED ........................................', round(time.time() - solve_starttime, 3), 'sec')
 
-    # -- ATTEMPT AT BETTER ESTIMATE FOR SWING VREG ------------------------------------------------
-    # -- GET BUSES NEAR THE SWING BUS -----------------------------------------
-    # levels_out = 1                                                                                  # DEFINE BUS NLEVELS FOR ADJUSTING SWING GEN SETPOINT
-    # nlevel_buses = [swingbus]                                                                       # INITIALIZE BUS LIST
-    # for i in range(levels_out):                                                                     # LOOP THROUGH HOW MANY LEVELS...
-    #     nlevel_buses = pp.get_connected_buses(net_a, nlevel_buses, respect_in_service=True)         # NEW BUSES ARE ADDED TO BUSLIST
-    # nlevel_buses = [x for x in nlevel_buses if x != ext_grid_idx]                                   # REMOVE EXTGRID BUS FROM BUSLIST
-    # net_a = estimate_swing_vreg(net_a, nlevel_buses, swingbus_idx, swinggen_dict, ext_grid_idx)     # SET SWING GENERATOR(S) VREG TO MAX OF NEIGHBOR BUSES
-    # pp.runpp(net_a, enforce_q_lims=True)                                                            # SOLVE INITIAL CONTINGENCY NETWORK
-
-
     # =============================================================================================
     # -- TRY TO FILTER OUT SOME GENERATOR AND BRANCH OUTAGES  -------------------------------------
     # =============================================================================================
-    goutagekeys = list(outage_dict['gen'].keys())                                                   # GET OUTAGED GENERATOR KEYS
-    boutagekeys = list(outage_dict['branch'].keys())                                                # GET OUTAGED BRANCH KEYS
+    goutagekeys = [x for x in goutagekeys if x not in zero_gens]                                    # REMOVE ANY GENERATOR OUTAGES WITH PGEN=0.0 or OFF-LINE
+    boutagekeys = [x for x in boutagekeys if x not in zero_branches]                                # REMOVE ANY BRANCH OUTAGES if OPEN
 
-    # -- TRY TO MINIMIZE OUTAGED GENERATORS TESTED FOR SCOPF ------------------
-    print('........................................................................................ Generator Outages Initial  = ', len(goutagekeys))     # TODO DEVELOPEMNT
-    goutagekeys = [x for x in goutagekeys if x not in zero_gens]                                    # REMOVE ANY GENERATOR OUTAGES WITH PGEN=0.0
-    print('........................................................................................ Generator Outages After  removing pgen=0  = ', len(goutagekeys))     # TODO DEVELOPEMNT
-
+    # -- OUTAGE ONLY THE LARGEST GENERATOR IN A PLANT -------------------------
     for bkey in plant_dict:                                                                         # LOOP ACROSS GENERATORS ON THE SAME BUS
         for gkey in plant_dict[bkey]:                                                               # GET THE KEY OF GENERATOR
             if gkey in goutagekeys:                                                                 # CHECK IF THIS GENERATOR IS IN THE GENERATOR OUTAGES...
@@ -1289,29 +1292,104 @@ if __name__ == "__main__":
                 if delete_keys:                                                                     # IF THE LESSER GENERATOR LIST IS NOT EMPTY...
                     goutagekeys = [x for x in goutagekeys if x not in delete_keys]                  # REMOVE THE LESSER GENERATORS ON SAME BUS FROM CONTINGENCY LIST
                 break                                                                               # GET THE NEXT GROUP OF GENERATORS ON THE SAME BUS
-    print('........................................................................................ Generator Outages After  removing lesser plant outages = ', len(goutagekeys))     # TODO DEVELOPEMNT
 
-    # -- TRY TO MINIMIZE OUTAGED BRANCHES TESTED FOR SCOPF --------------------
-    print('........................................................................................ Branch Outages Initial  = ', len(boutagekeys))     # TODO DEVELOPEMNT
-    boutage_threshold = 10.0
+    # -- DEFAULT MINIMIZE GENERATOR AND BRANCH OUTAGES ------------------------
+    default_goutage_threshold = 10.0
+    default_boutage_threshold = 10.0
+    low_gpgen_keys = []
     low_bflow_keys = []
+
+    for gkey in goutagekeys:
+        gidx = gen_dict[gkey]
+        pgen = net_a.gen.loc[gidx, 'p_mw']
+        if pgen < default_goutage_threshold:
+            low_gpgen_keys.append(bkey)
+    goutagekeys = [x for x in goutagekeys if x not in low_gpgen_keys]                               # REMOVE BRANCHES WITH LOW FLOW FROM CONTINGENCY LIST
+
     for bkey in boutagekeys:
         if bkey in line_dict:
             lidx = line_dict[bkey]
             branch_flow = net_a.res_line.loc[lidx, 'p_from_mw']
-            if abs(branch_flow) < boutage_threshold:
+            if abs(branch_flow) < default_boutage_threshold:
                 low_bflow_keys.append(bkey)
         elif bkey in xfmr_dict:
             xidx = xfmr_dict[bkey]
             branch_flow = net_a.res_trafo.loc[xidx, 'p_hv_mw']
-            if abs(branch_flow) < boutage_threshold:
+            if abs(branch_flow) < default_boutage_threshold:
                 low_bflow_keys.append(bkey)
     boutagekeys = [x for x in boutagekeys if x not in low_bflow_keys]                               # REMOVE BRANCHES WITH LOW FLOW FROM CONTINGENCY LIST
-    print('........................................................................................ Branch Outages After  removing low flow banches = ', len(boutagekeys))     # TODO DEVELOPEMNT
+    NumOutages_1 = len(goutagekeys) + len(boutagekeys)
+
+    # -- ORDER GENERATOR OUTAGES LARGEST TO SMALLEST --------------------------
+    gen_pgens = []
+    for gkey in goutagekeys:
+        gidx = gen_dict[gkey]
+        pgen = net_a.gen.loc[gidx, 'p_mw']
+        gen_pgens.append([pgen, gkey])
+    gen_pgens.sort(reverse=True)
+    sorted_gkeys = [x[1] for x in gen_pgens]
+    goutagekeys = [x for x in sorted_gkeys]
+
+    # -- ORDER BRANCH OUTAGES LARGEST TO SMALLEST FLOW ------------------------
+    branch_flows = []
+    for bkey in boutagekeys:
+        if bkey in line_dict:
+            lidx = line_dict[bkey]
+            branch_flow = net_a.res_line.loc[lidx, 'p_from_mw']
+            branch_flows.append([abs(branch_flow), bkey])
+        elif bkey in xfmr_dict:
+            xidx = xfmr_dict[bkey]
+            branch_flow = net_a.res_trafo.loc[xidx, 'p_hv_mw']
+            branch_flows.append([abs(branch_flow), bkey])
+    branch_flows.sort(reverse=True)
+    sorted_bkeys = [x[1] for x in branch_flows]
+    boutagekeys = [x for x in sorted_bkeys]
 
 
-    MaxRunningTime = 2700                   # TODO DEVELOPMENT
+    # -- TRY TO MINIMIZE OUTAGED BRANCHES TESTED FOR SCOPF --------------------
+    if 0 < NumOutages_1 < 100:
+        pass
+    if 0 < NumOutages_1 < 200:
+        pass
+    if 0 < NumOutages_1 < 500:
+        pass
+
+    elif 501 < NumOutages_1 < 1000:
+        NumOutages = NumOutages_1
+        # print('less than', '1000')
+        # let fewer outages run
+        pass
+    elif 1001 < NumOutages_1 < 2000:
+        NumOutages = NumOutages_0
+        # print('less than', '12000')
+        # let fewer outages run
+        pass
+    elif 2001 < NumOutages_1 < 3000:
+        boutagekeys = boutagekeys[0:20]
+        goutagekeys = goutagekeys[0:20]
+
+        NumOutages = NumOutages_0
+        # print('less than', '3000')
+        # let even fewer outages run
+        pass
+
+    elif 3001 < NumOutages_1 < 4000:
+        boutagekeys = boutagekeys[0:20]
+        goutagekeys = goutagekeys[0:20]
+        pass
+    else:
+        NumOutages = NumOutages_1
+        # print('less than', '4000')
+        # let even fewer outages run
+        pass
+
+
+    NumOutages_2 = len(goutagekeys) + len(boutagekeys)
+    print('   BUSES ...........................................................', NumBuses)
+    print('   OUTAGES .........................................................', NumOutages_0, '-', NumOutages_1, '-', NumOutages_2)
+
     ScoringMethod = 2                       # TODO DEVELOPMENT
+    MaxRunningTime = 2700
 
     # -- GET DISTRIBUTION FACTOR DICTIONARY -------------------------------------------------------
     if ScoringMethod in [1, 3]:
@@ -1332,15 +1410,53 @@ if __name__ == "__main__":
     # c_net.line['max_i_ka'] = net_c.line['max_i_ka']                                                 # CHANGE LINE MAXLOADING TO RATEC
     # c_net.trafo['sn_mva'] = net_c.trafo['sn_mva']                                                   # CHANGE XFMR MAXLOADING TO RATEC
 
+    if len(swinggen_dict) == 1 and list(swinggen_dict.keys())[0] in goutagekeys:
+        print('SINGLE SWING GENERATOR IN OUTAGES .... RUN IT FIRST ................')
+        net = copy.deepcopy(c_net)
+        for swkey in swinggen_dict:
+            swidx = swinggen_dict[swkey]
+            base_pgen_dict = get_base_pgens(c_net, online_gens, gen_dict, genbus_dict, swingbus)    # GET GENERATORS PGEN FOR FROM BASECASE
+            net.gen.in_service[swidx] = False                                                       # SWITCH OFF OUTAGED GENERATOR
+            try:
+                pp.runpp(net, enforce_q_lims=True)                                                  # SOLVE THIS NETWORK WITH POWERFLOW
+            except:
+                pp.runpp(net, enforce_q_lims=False)                                                 # SOLVE THIS NETWORK WITH POWERFLOW
+            try:                                                                                    # TRY OPF POWERFLOW SOLUTION
+                pp.runopp(net, init='pf')                                                           # RUN OPF ON THIS NETWORK
+            except:                                                                                 # IF NO SOLUTION...
+                print('SWING GEN OUTAGE DID NOT SOLVE WITH OPF ... (SKIP IT) ..........', swkey)    # PRINT NOSOLVE MESSAGE
+                goutagekeys = [x for x in goutagekeys if x != swkey]                                # REMOVE SWING GEN FROM OUTAGES
+                break                                                                               # SKIP SWING GEN OUTAGE AND KEEP GOING
+
+            net = copy_opf_to_network(net, net, gen_dict, genbus_dict, swingbus, swsh_dict, swshbus_dict)   # COPY OPF RESULTS TO THIS NETWORK
+            pp.runpp(net, enforce_q_lims=True)                                                              # SOLVE THIS NETWORK WITH POWERFLOW
+            # -- GET GENERATORS PGEN FROM OPF RESULTS (SET AND LOCK IF SIGNIFICANT CHANGE) --------
+            for g_key in participating_gens:                                                        # LOOP ACROSS ONLINE GENERATOR KEYS
+                if g_key == swkey:                                                                  # CHECK IF THIS OUTAGE IS THIS GENERATOR...
+                    continue                                                                        # IF SO... GET THE NEXT GENERATOR
+                g_idx = gen_dict[g_key]                                                             # GET GENERATOR INDEX
+                gen_bus = genbus_dict[g_idx]                                                        # GET GENERATOR BUS
+                base_pgen = base_pgen_dict[g_key]                                                   # GET THIS GENERATOR'S BASECASE PGEN
+                pgen = net.res_gen.loc[g_idx, 'p_mw']                                               # GET THIS GENERATOR'S N-1 PGEN
+                pgen_delta = abs(pgen - base_pgen)                                                  # CALCULATE THIS GENERATOR'S PGEN CHANGE (COMPARED TO BASECASE)
+                if pgen_delta > 1.2:                                                                # IF THIS GENERATOR CHANGED MORE THAN THIS... (1.2 SEEMS THE "SWEETSPOT")
+                    c_net.gen.loc[g_idx, 'p_mw'] = pgen                                             # SET THIS GENERATOR'S PGEN TO OPF RESULT
+                    c_net.gen.loc[g_idx, 'min_p_mw'] = pgen                                         # SET THIS GENERATOR'S MAXIMUM POWER OUTPUT
+                    c_net.gen.loc[g_idx, 'max_p_mw'] = pgen                                         # SET THIS GENERATOR'S MINIMUM POWER OUTPUT
+            try:
+                pp.runpp(c_net, enforce_q_lims=True)                                                # SOLVE THIS NETWORK WITH POWERFLOW
+            except:
+                c_net = copy.deepcopy(net_a)                                                        # GET COPY OF THE RATE A NETWORK
+            goutagekeys = [x for x in goutagekeys if x != swkey]                                    # REMOVE SWING GEN FROM OUTAGES
+        print('NOW FIND DOMINANT OUTAGES  .........................................')
+
     # =============================================================================================
     # -- LOOP WHILE THERE ARE REMAINING DOMINANT OUTAGES ------------------------------------------
     # =============================================================================================
     step = 0                                                                                        # INITIALIZE WHILE LOOP ITERATOR
     start_time = time.time()                                                                        # SET THE WHILE LOOP START TIME
     this_iteration_time = 0.0                                                                       # INITIALIZE TIME FOR EACH WHILE LOOP ITERATION
-    # max_iteration_time = 0.0                                                                        # INITIALIZE MAX ITERATION TIME
     processed_outages = []                                                                          # INITIALIZE LIST OF ALREADY PROCESSED OUTAGES
-    # min_total_overloading = 9999.9                                                                  # INITIALIZE A MIN TOTAL OVERLOAING (TO CAPTURE BEST NETWORK DURING ITERATIONS)
 
     outage_keys = goutagekeys + boutagekeys
     # outage_keys = goutagekeys
@@ -1359,14 +1475,11 @@ if __name__ == "__main__":
         # -- GET THIS MASTER BASECASE OPERATING POINT ----------------------------------------------
         # base_pgen_dict = get_base_pgens(c_net, online_gens, gen_dict, genbus_dict, swingbus)        # GET GENERATORS PGEN FOR THIS MASTER BASECASE
 
-
-        dstart_time = time.time()
         # -- GET DOMINANT OUTAGES RESULTING IN BRANCH LOADING VIOLATIONS ---------------------------
         if ScoringMethod in [1, 3]:
-            dominant_outages, total_overloading = get_dominant_outages1(c_net, outage_keys, gen_dict, line_dict, xfmr_dict, swinggen_dict, step, df_dict)
+            c_net, dominant_outages, total_overloading = get_dominant_outages_df(c_net, outage_keys, online_gens, gen_dict, line_dict, xfmr_dict, step, df_dict)
         if ScoringMethod in [2, 4]:
-            c_net, dominant_outages, total_overloading = get_dominant_outages2(c_net, outage_keys, online_gens, gen_dict, line_dict, xfmr_dict, swinggen_dict, step)
-        # print('DOMINANT OUTAGES FOUND .............................................', round(time.time() - dstart_time, 3), 'sec')
+            c_net, dominant_outages, total_overloading = get_dominant_outages(c_net, outage_keys, online_gens, gen_dict, line_dict, xfmr_dict, step)
 
         remaining_outages = [x for x in dominant_outages if x not in processed_outages]             # GET REMAINING OUTAGES
 
@@ -1409,7 +1522,7 @@ if __name__ == "__main__":
         # o_key = remaining_outages[0]                                                                # SET THIS WORST OUTAGE KEY
         o_key = dominant_outages[0]                                                                # SET THIS WORST OUTAGE KEY
         print(' PROCESSED OUTAGES', processed_outages)
-        print('    NOW PROCESSING', o_key, '........................................... {0:6.1f}'.format(countdown_time), 'Sec remaining')
+        print('    NOW PROCESSING {0:<12s} .................................... {1:.1f}'.format(o_key, countdown_time), 'Sec remaining')
         net = copy.deepcopy(c_net)                                                              # GET FRESH COPY OF THIS MASTER NETWORK
         if o_key in gen_dict:                                                                   # CHECK IF A GENERATOR...
             g_idx = gen_dict[o_key]                                                             # GET GENERATOR INDEX
@@ -1499,13 +1612,11 @@ if __name__ == "__main__":
         if gen_off_schedule:                                                                        # GENERATOR FOUND OFF SCHEDULE...
             for gidx in gen_indexes:                                                                # LOOP ACROSS GENERATORS ON THIS BUS
                 net_a.gen.loc[gidx, 'vm_pu'] = bus_voltage                                          # THIS NETWORK, SET THIS GENERATORS VREG TO BUS VOLTAGE
-                print('Generator at Bus', genbus, 'at Qmax')
-
+                # print('Generator at Bus', genbus, 'at Qmax')
             if genbus in swshidx_dict:                                                              # CHECK IF THERE IS A SWSHUNT ON THIS GEN BUS
                 shidx = swshidx_dict[genbus]                                                        # GET SWSHUNT INDEX
                 net_a.gen.loc[shidx, 'vm_pu'] = bus_voltage                                         # ALSO SET SWSHUNT VREG TO BUS VOLTAGE
-
-                print('Generator(s) and SWShunt on Same Bus', genbus)
+                # print('Generator(s) and SWShunt on Same Bus', genbus)
             pp.runpp(net_a, init='results', enforce_q_lims=True)                                    # THIS NETWORK, RUN STRAIGHT POWER FLOW
 
     # -- INSURE SWSHUNTS SUSCEPTANCE IS WITHIN LIMITS IN BASECASE ---------------------------------
@@ -1652,3 +1763,4 @@ if __name__ == "__main__":
         shutil.copy(inl_fname, os.path.join(dirname, 'GitHub_Work'))
         shutil.copy(rop_fname, os.path.join(dirname, 'GitHub_Work'))
         shutil.copy(os.path.realpath(__file__), os.path.join(dirname, 'GitHub_Work/MyPython1.py'))
+
