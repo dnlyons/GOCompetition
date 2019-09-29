@@ -8,7 +8,6 @@ import numpy
 import pandapower as pp
 from pandas import options as pdoptions
 import data as data_read
-from itertools import chain
 import multiprocessing
 
 cwd = os.path.dirname(__file__)
@@ -254,7 +253,7 @@ def arghelper1(args):
 
 def parallel_run_outage_ac(arglist):
     """" prepare group data for parallel screening """
-    numcpus = int(os.environ['NUMBER_OF_PROCESSORS'])
+    numcpus = int(os.cpu_count())
     pool = multiprocessing.Pool(processes=numcpus)
     results = pool.map(arghelper1, arglist)
     pool.close()
@@ -584,7 +583,7 @@ def arghelper2(args):
 
 def parallel_run_outage_opf(arglist):
     """" prepare outage data for parallel processing """
-    numcpus = int(os.environ['NUMBER_OF_PROCESSORS'])
+    numcpus = int(os.cpu_count())
     pool = multiprocessing.Pool(processes=numcpus)
     results = pool.map(arghelper2, arglist)
     pool.close()
@@ -1385,9 +1384,9 @@ if __name__ == "__main__":
         base_pgen_dict = get_generator_pgens(c_net, online_gens, gen_keyidx)                        # GET GENERATORS PGEN FOR THIS MASTER BASECASE
 
         # == GET DOMINANT OUTAGES RESULTING IN BRANCH LOADING VIOLATIONS ==========================
-        dominant_outages, num_overloads = get_dominant_outages_ac(c_net, outage_keys, online_gens, gen_keyidx,            #
-                                                                  line_keyidx, xfmr_keyidx, load_keyidx,                  #
-                                                                  total_loadp, step)                                      # GET DOMINANT GENERATOR AND BRANCH OUTAGES USING AC POWERFLOW
+        dominant_outages, num_overloads = get_dominant_outages_ac(c_net, outage_keys, online_gens, gen_keyidx,      #
+                                                                  line_keyidx, xfmr_keyidx, load_keyidx,            #
+                                                                  total_loadp, step)                                # GET DOMINANT GENERATOR AND BRANCH OUTAGES USING AC POWERFLOW
         # if ScoringMethod in [1, 3]:
         #     dominant_outages, num_overloads = get_dominant_outages_df(c_net, outage_keys, online_gens, gen_keyidx,      # CHECK IF REAL-TIME SCORING METHOD
         #                                                               line_keyidx, xfmr_keyidx, df_dict, step)          # GET DOMINANT GENERATOR AND BRANCH OUTAGES USING DF
@@ -1396,17 +1395,17 @@ if __name__ == "__main__":
         #                                                               line_keyidx, xfmr_keyidx, load_keyidx,            #
         #                                                               total_loadp, step)                                # GET DOMINANT GENERATOR AND BRANCH OUTAGES USING AC POWERFLOW
 
+        if num_overloads == 0:                                                                      # CHECK IF NO OVERLOADS FOUND...
+            print()                                                                                 # PRINT BLANK LINE
+            break                                                                                   # BREAK OUT OF WHILE LOOP
+        if countdown_time < (time_per_outage * num_overloads):                                      # CHECK IF NOT ENOUGH TIME TO RUN ALL THE OVERLOADS
+            num_overloads = int(countdown_time / time_per_outage)                                   # CALCULATE HOW MANY CAN BE PROCESSED
+            if num_overloads < 1:                                                                   # IF NO ENOUGH TIME FOR ONE OF THE OVERLOADS...
+                break                                                                               # EXIT WHILE LOOP AND FINALIZE RESULTS SO FAR
+
         o_keys = dominant_outages[:num_overloads]                                                                       # SET HOW MANY DOMINANT OUTAGES TO PROCESS
         print('{0:<2d} PROCESSED OUTAGES'.format(step), processed_outages)                                              # PRINT STATEMENT
         print('{0:<2d}    NOW PROCESSING'.format(step), o_keys, '.....', round(countdown_time, 1), 'Sec remaining')     # PRINT STATEMENT
-
-        if num_overloads == 0:                                                                                          # CHECK IF NO OVERLOADS FOUND...
-            print()
-            break                                                                                                       # BREAK OUT OF WHILE LOOP
-        if countdown_time < (time_per_outage * num_overloads):
-            num_overloads = int(countdown_time / time_per_outage)
-            if num_overloads < 1:
-                break
 
         # ==========================================================================================
         # == RUN THE DOMINANT OUTAGES ON THIS BASECASE WITH OPF ====================================
@@ -1552,7 +1551,7 @@ if __name__ == "__main__":
 
     # -- MAKE SHURE GENERATORS WITH PMAX=0 HAVE PGEN=0 --------------------------------------------
     for gkey in gen_keyidx:                                                                         # LOOP ACROSS GENERATOR KEYS
-        gidx = gen_keyidx[gkey]                                                                    # GET GENERATOR INDEX
+        gidx = gen_keyidx[gkey]                                                                     # GET GENERATOR INDEX
         if net_a.gen.loc[gidx, 'max_p_mw'] == 0.0:                                                  # CHECK IF PMAX=0
             net_a.gen.loc[gidx, 'p_mw'] = 0.0                                                       # SET PGEN=0
 
