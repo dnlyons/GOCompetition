@@ -42,7 +42,7 @@ if not sys.argv[1:]:
     SFile = open('submission.conf', 'w')
     SFile.write('modules=python/3.7.2\n')
 
-    SFile.write('model=Network_05R-01\n')                 # TODO FOR SANDBOX ONLY   manually enter this here or edit in submission.conf   COMMENT OUT FOR REAL SUBMISSION
+    SFile.write('model=Network_03R-01\n')                 # TODO FOR SANDBOX ONLY   manually enter this here or edit in submission.conf   COMMENT OUT FOR REAL SUBMISSION
     SFile.write('scenario=1\n')                           # TODO FOR SANDBOX ONLY   manually enter this here or edit in submission.conf   COMMENT OUT FOR REAL SUBMISSION
 
     SFile.write('export PATH="$GUROBI_811_HOME/bin:$PATH"\n')

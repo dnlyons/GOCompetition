@@ -1946,6 +1946,12 @@ function compute_power_balance_deltas!(network)
     PowerModels.update_data!(network, balance)
     p_delta_abs = [abs(bus["p_delta"]) for (i,bus) in network["bus"] if bus["bus_type"] != 4]
     q_delta_abs = [abs(bus["q_delta"]) for (i,bus) in network["bus"] if bus["bus_type"] != 4]
+    for (i,bus) in network["bus"]
+        pdelta = abs(bus["p_delta"])
+        if pdelta > 0.01
+            println("  bus = $(bus) pdelta = $(pdelta)")
+        end
+    end
     return (
            p_delta_abs_max = maximum(p_delta_abs),
            p_delta_abs_mean = mean(p_delta_abs),
