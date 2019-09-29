@@ -51,10 +51,6 @@ if not sys.argv[1:]:
     except FileNotFoundError:
         pass
 
-MaxLoading = 95.0                       # MAXIMUM %BRANCH LOADING FOR N-0 AND N-1
-MaxMinBusVoltageAdj = 0.015             # MIN, MAX BUS VOLTAGE ADJUSTEMENT
-UseNetC = False                         # FLAG FOR WHICH NETWORK TO USE FOR SCOPF
-
 
 # =============================================================================
 # -- FUNCTIONS ----------------------------------------------------------------
@@ -178,11 +174,6 @@ def get_swgens_data(swbus, generators):
     for gen in del_gens:
         del generators[gen]
     return swgens_data
-
-def copy_dcopf_to_network(copyfrom_net, copyto_net):
-    """copy opf results to this network"""
-    copyto_net.gen['p_mw'] = copyfrom_net.res_gen['p_mw']                                           # set this network generators power to opf results
-    return copyto_net
 
 
 def copy_opf_to_network(copyfrom_net, copyto_net, gendict, genbusdict, swbus, swshdict, swshbusdict, extgrididx):
@@ -736,12 +727,16 @@ def print_dataframes_results(_net):                                             
 # -- MYPYTHON_1 -----------------------------------------------------------------------------------
 # =================================================================================================
 if __name__ == "__main__":
-    print()
+    master_start_time = time.time()                                                                 # INITIALIZE MAIN PROGRAM START TIME
+    print()                                                                                         # PRINT STATEMENT
     print('===================  ' + NetworkModel + '  ===================')
     print('MAX RUNNING TIME =', MaxRunningTime)
     print('SCORING METHOD =', ScoringMethod)
 
-    master_start_time = time.time()
+    MaxLoading = 95.0                                                                               # MAXIMUM %BRANCH LOADING FOR N-0 AND N-1
+    UseNetC = False                                                                                 # FLAG FOR WHICH NETWORK TO USE FOR SCOPF
+    if UseNetC:                                                                                     # IF USING NETC FOR SCOPF...
+        MaxMinBusVoltageAdj = 0.015                                                                 # SET NETC MIN, MAX BUS VOLTAGE ADJUSTMENT
 
     # =============================================================================================
     # -- GET RAW,ROP,INL,CON DATA FROM FILES ------------------------------------------------------
@@ -858,6 +853,7 @@ if __name__ == "__main__":
         idx = pp.create_bus(net_a, vn_kv=busnomkv, name=bus.name, zone=busarea, max_vm_pu=bus.nvhi - 0.005, min_vm_pu=bus.nvlo + 0.005, in_service=True, index=busnum)
         # -- CONTINGENCY NETWORK ------------------------------------------------------------------
         if UseNetC:
+
             idx = pp.create_bus(net_c, vn_kv=busnomkv, name=bus.name, zone=busarea, max_vm_pu=bus.evhi - MaxMinBusVoltageAdj, min_vm_pu=bus.evlo + MaxMinBusVoltageAdj, in_service=True, index=busnum)
         if busnum == swingbus:
             swingbus_idx = idx
@@ -1255,7 +1251,6 @@ if __name__ == "__main__":
             zero_branches.append(xfmrkey)
 
     # == ADD EXTERNAL GRID ========================================================================
-    # == WITH DUMMY TIE TO RAW SWING BUS ==========================================================
     ext_tie_rating = 1e5/(math.sqrt(3) * swing_kv)                                                 # CURRENT RATING USING SWING KV
     # -- CREATE BASE NETWORK EXTERNAL GRID --------------------------------------------------------
     ext_grid_idx = pp.create_bus(net_a, vn_kv=swing_kv, name='Ex_Grid_Bus', max_vm_pu=sw_vmax_a, min_vm_pu=sw_vmin_a)
@@ -1274,17 +1269,17 @@ if __name__ == "__main__":
         pp.create_poly_cost(net_c, ext_grid_idx, 'ext_grid', cp1_eur_per_mw=0, cp0_eur=1e9, cq1_eur_per_mvar=0, cq0_eur=1e9)
         # pp.create_poly_cost(net_c, ext_grid_idx, 'ext_grid', cq1_eur_per_mvar=0, cq0_eur=1e9, type='q')
 
+    print('   NETWORKS CREATED ................................................', round(time.time() - create_starttime, 3), 'sec')
     # =============================================================================================
     # -- NETWORKS CREATED -------------------------------------------------------------------------
     # =============================================================================================
-    print('   NETWORKS CREATED ................................................', round(time.time() - create_starttime, 3), 'sec')
 
-    # == SOLVE NETWORK WITH POWERFLOW =============================================================
+    # -- SOLVE NETWORK WITH POWERFLOW -------------------------------------------------------------
     solve_starttime = time.time()                                                                   # INITIALIZE START-TIME
     pp.runpp(net_a, enforce_q_lims=True)                                                            # RUN POWERFLOW ON THIS NETWORK
     print('   POWERFLOW SOLVED ................................................', round(time.time() - solve_starttime, 3), 'sec')
 
-    # == SOLVE NETWORK WITH OPF ===================================================================
+    # -- SOLVE NETWORK WITH OPF -------------------------------------------------------------------
     solve_starttime = time.time()                                                                   # INITIALIZE START-TIME
     net = copy.deepcopy(net_a)                                                                      # COPY NETWORK A
     pp.runopp(net, init='pf')                                                                                            # RUN OPF ON THIS NETWORK
@@ -1342,14 +1337,14 @@ if __name__ == "__main__":
     sorted_bkeys = [x[1] for x in branch_flows]
     boutage_keys = [x for x in sorted_bkeys]
 
-    goutage_keys = goutage_keys[:100]
-    boutage_keys = boutage_keys[:100]
+    goutage_keys = goutage_keys[:100]                                           # SET HOW MANY GENERATOR OUTAGES TO CONSIDER
+    boutage_keys = boutage_keys[:100]                                           # SET HOW MANY BRANCH OUTAGES TO CONSIDER
     NumOutages_1 = len(goutage_keys) + len(boutage_keys)
     print('   BUSES ...........................................................', NumBuses)
     print('   OUTAGES .........................................................', NumOutages_0, '-', NumOutages_1)
 
     # *********************************************************************************************
-    # -- FIND BASECASE SCOPF OPERATING POINT ------------------------------------------------------
+    # -- FIND BASECASE OPF OPERATING POINT --------------------------------------------------------
     # *********************************************************************************************
     print('-------------------- ATTEMPTING BASECASE SCOPF ---------------------')
 
@@ -1361,27 +1356,28 @@ if __name__ == "__main__":
         c_net = copy.deepcopy(net_a)                                                                # GET COPY OF THE RATEA NETWORK
 
     # -- GET DISTRIBUTION FACTOR DICTIONARY -------------------------------------------------------
-    ScoringMethod = 2                                                                               # TODO DEVELOPMENT
-    MaxRunningTime = 2700                                                                           # TODO DEVELOPMENT
-    if ScoringMethod in [1, 3]:                                                                     # CHECK IF REAL-TIME SCORING METHOD
-        dfstart_time = time.time()
-        net = copy.deepcopy(c_net)
-        df_dict = get_df_dict(net, goutage_keys, boutage_keys, gen_keyidx, line_keyidx, xfmr_keyidx, load_keyidx, total_loadp)      # df_dict{okey1:{bkey1:df, ...},okey2:{bkey1:df, ...}, ...}
-        print('DISTRIBUTION FACTORS CALCULATED ....................................', round(time.time() - dfstart_time, 3), 'sec')
+    # ScoringMethod = 2                                                                               # TODO DEVELOPMENT
+    # MaxRunningTime = 2700                                                                           # TODO DEVELOPMENT
+    # if ScoringMethod in [1, 3]:                                                                     # CHECK IF REAL-TIME SCORING METHOD
+    #     dfstart_time = time.time()
+    #     net = copy.deepcopy(c_net)
+    #     df_dict = get_df_dict(net, goutage_keys, boutage_keys, gen_keyidx, line_keyidx, xfmr_keyidx, load_keyidx, total_loadp)      # df_dict{okey1:{bkey1:df, ...},okey2:{bkey1:df, ...}, ...}
+    #     print('DISTRIBUTION FACTORS CALCULATED ....................................', round(time.time() - dfstart_time, 3), 'sec')
 
     # /\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/
     # -- LOOP WHILE THERE ARE REMAINING DOMINANT OUTAGES ------------------------------------------
     # /\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/
-    step = 0                                                                                        # INITIALIZE WHILE LOOP ITERATOR
     scopf_start_time = time.time()                                                                  # SET THE WHILE LOOP START TIME
-    last_iteration_time = 0.0                                                                       # INITIALIZE TIME FOR EACH WHILE LOOP ITERATION
-    time_per_outage = 1.0
-
+    step = 0                                                                                        # INITIALIZE WHILE LOOP ITERATOR
     processed_outages = []                                                                          # INITIALIZE LIST OF ALREADY PROCESSED OUTAGES
-    outage_keys = goutage_keys + boutage_keys
+
+    last_iteration_time = 0.0                                                                       # INITIALIZE TIME FOR EACH WHILE LOOP ITERATION
+    time_per_outage = opf_solvetime
     elapsed_time = round(time.time() - master_start_time, 3)                                        # GET THE ELAPSED TIME SO FAR
     time_to_finalize = opf_solvetime + 10.0
     countdown_time = MaxRunningTime - elapsed_time - time_to_finalize                               # INITIALIZE COUNTDOWN TIME
+
+    outage_keys = goutage_keys + boutage_keys
 
     while countdown_time > 0.0:                                                                     # LOOP WHILE TIME REMAINS
         start_iteration_time = time.time()                                                          # INITIALIZE START ITERATION TIME
@@ -1389,13 +1385,16 @@ if __name__ == "__main__":
         base_pgen_dict = get_generator_pgens(c_net, online_gens, gen_keyidx)                        # GET GENERATORS PGEN FOR THIS MASTER BASECASE
 
         # == GET DOMINANT OUTAGES RESULTING IN BRANCH LOADING VIOLATIONS ==========================
-        if ScoringMethod in [1, 3]:
-            dominant_outages, num_overloads = get_dominant_outages_df(c_net, outage_keys, online_gens, gen_keyidx,      # CHECK IF REAL-TIME SCORING METHOD
-                                                                      line_keyidx, xfmr_keyidx, df_dict, step)          # GET DOMINANT GENERATOR AND BRANCH OUTAGES USING DF
-        elif ScoringMethod in [2, 4]:                                                                                   # CHECK IF OFF-LINE SCORING METHOD
-            dominant_outages, num_overloads = get_dominant_outages_ac(c_net, outage_keys, online_gens, gen_keyidx,      #
-                                                                      line_keyidx, xfmr_keyidx, load_keyidx,            #
-                                                                      total_loadp, step)                                # GET DOMINANT GENERATOR AND BRANCH OUTAGES USING AC POWERFLOW
+        dominant_outages, num_overloads = get_dominant_outages_ac(c_net, outage_keys, online_gens, gen_keyidx,            #
+                                                                  line_keyidx, xfmr_keyidx, load_keyidx,                  #
+                                                                  total_loadp, step)                                      # GET DOMINANT GENERATOR AND BRANCH OUTAGES USING AC POWERFLOW
+        # if ScoringMethod in [1, 3]:
+        #     dominant_outages, num_overloads = get_dominant_outages_df(c_net, outage_keys, online_gens, gen_keyidx,      # CHECK IF REAL-TIME SCORING METHOD
+        #                                                               line_keyidx, xfmr_keyidx, df_dict, step)          # GET DOMINANT GENERATOR AND BRANCH OUTAGES USING DF
+        # elif ScoringMethod in [2, 4]:                                                                                   # CHECK IF OFF-LINE SCORING METHOD
+        #     dominant_outages, num_overloads = get_dominant_outages_ac(c_net, outage_keys, online_gens, gen_keyidx,      #
+        #                                                               line_keyidx, xfmr_keyidx, load_keyidx,            #
+        #                                                               total_loadp, step)                                # GET DOMINANT GENERATOR AND BRANCH OUTAGES USING AC POWERFLOW
 
         o_keys = dominant_outages[:num_overloads]                                                                       # SET HOW MANY DOMINANT OUTAGES TO PROCESS
         print('{0:<2d} PROCESSED OUTAGES'.format(step), processed_outages)                                              # PRINT STATEMENT
@@ -1416,21 +1415,27 @@ if __name__ == "__main__":
         gen_minmax_dict = {}                                                                        # DECLARE GENERATOR MIN-MAX CHANGE DICT
         gdelta_threshold = 1.2                                                                      # SET HOW MUCH GENERATOR CHANGE TO CONSIDER
 
-        Parallel_Process_Outages = True                                                             # SET PARALLEL PROCESSING FLAG
+        # -- RUN THE OUTAGES IN PARLLEL ---------------------------------------
+        arglist = [[c_net, x, participating_gens, gen_keyidx, line_keyidx, xfmr_keyidx, genbus_dict,            #
+                    swingbus, swsh_keyidx, swshbus_dict, ext_grid_idx] for x in o_keys]                         # GET ARGUMENT LIST FOR EACH PROCESS
+        results = parallel_run_outage_opf(arglist)                                                              # GET PARALLEL RESULTS
+        for opf_pgen_dict_i in results:                                                                         # LOOP ACROSS THE OUTAGES OPF GENERATOR DICTS
+            opf_pgen_dict.update(opf_pgen_dict_i)                                                               # UPDATE THE MASTER OPF GENERATOR DICT
 
-        if not Parallel_Process_Outages:                                                                        # IF NOT PARALLEL PROCESSING...
-            for o_key in o_keys:                                                                                # LOOP THROUGH OUTAGE KEYS
-                opf_pgen_dict_i = run_outage_opf(c_net, o_key, participating_gens, gen_keyidx, line_keyidx,     #
-                                                 xfmr_keyidx, genbus_dict, swingbus, swsh_keyidx,               # GET THIS OUTAGE OPF GENERATOR DICT
-                                                 swshbus_dict, ext_grid_idx)                                    # {O_KEY1:{GKEY1:PGEN1, GKEY2:PGEN2, ...}}
-                opf_pgen_dict.update(opf_pgen_dict_i)                                                           # UPDATE THE MASTER OPF GENERATOR DICT
-
-        if Parallel_Process_Outages:                                                                            # IF PARALLEL PROCESSING...
-            arglist = [[c_net, x, participating_gens, gen_keyidx, line_keyidx, xfmr_keyidx, genbus_dict,        #
-                        swingbus, swsh_keyidx, swshbus_dict, ext_grid_idx] for x in o_keys]                     # GET ARGUMENT LIST FOR EACH PROCESS
-            results = parallel_run_outage_opf(arglist)                                                          # GET PARALLEL RESULTS
-            for opf_pgen_dict_i in results:                                                                     # LOOP ACROSS THE OUTAGES OPF GENERATOR DICTS
-                opf_pgen_dict.update(opf_pgen_dict_i)                                                           # UPDATE THE MASTER OPF GENERATOR DICT
+        # Parallel_Process_Outages = True                                                                         # SET PARALLEL PROCESSING FLAG
+        # if not Parallel_Process_Outages:                                                                        # IF NOT PARALLEL PROCESSING...
+        #     for o_key in o_keys:                                                                                # LOOP THROUGH OUTAGE KEYS
+        #         opf_pgen_dict_i = run_outage_opf(c_net, o_key, participating_gens, gen_keyidx, line_keyidx,     #
+        #                                          xfmr_keyidx, genbus_dict, swingbus, swsh_keyidx,               # GET THIS OUTAGE OPF GENERATOR DICT
+        #                                          swshbus_dict, ext_grid_idx)                                    # {O_KEY1:{GKEY1:PGEN1, GKEY2:PGEN2, ...}}
+        #         opf_pgen_dict.update(opf_pgen_dict_i)                                                           # UPDATE THE MASTER OPF GENERATOR DICT
+        #
+        # if Parallel_Process_Outages:                                                                            # IF PARALLEL PROCESSING...
+        #     arglist = [[c_net, x, participating_gens, gen_keyidx, line_keyidx, xfmr_keyidx, genbus_dict,        #
+        #                 swingbus, swsh_keyidx, swshbus_dict, ext_grid_idx] for x in o_keys]                     # GET ARGUMENT LIST FOR EACH PROCESS
+        #     results = parallel_run_outage_opf(arglist)                                                          # GET PARALLEL RESULTS
+        #     for opf_pgen_dict_i in results:                                                                     # LOOP ACROSS THE OUTAGES OPF GENERATOR DICTS
+        #         opf_pgen_dict.update(opf_pgen_dict_i)                                                           # UPDATE THE MASTER OPF GENERATOR DICT
 
         # -- INITIALIZE MIN-MAX GENERATOR CHANGE DICT -------------------------
         for g_key in participating_gens:                                                            # LOOP ACROSS PARTICIPATING GENERATORS
@@ -1501,8 +1506,8 @@ if __name__ == "__main__":
         countdown_time -= last_iteration_time                                                       # DECREMENT COUNTDOWN TIME
         time_per_outage = last_iteration_time / len(o_keys)                                         # CALCULATE TIME PER OUTAGE
 
-        # outage_keys = dominant_outages[0:]                                                          # UPDATE OUTAGE KEYS (USE ALL DOMINANT OUTAGES)
         outage_keys = dominant_outages[1:]                                                          # UPDATE OUTAGE KEYS (REMOVE THIS LOOPS WORST DOMINANT OUTAGE)
+        # outage_keys = dominant_outages[0:]                                                          # UPDATE OUTAGE KEYS (USE ALL DOMINANT OUTAGES)
         # outage_keys = dominant_outages[num_overloads:]                                              # UPDATE OUTAGE KEYS (REMOVE THIS LOOPS DOMINANT OUTAGES)
 
     # /\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/
@@ -1512,7 +1517,6 @@ if __name__ == "__main__":
     # =============================================================================================
     # -- FINALIZE THE SCOPF BASECASE --------------------------------------------------------------
     # =============================================================================================
-    finalize_time = time.time()                                                             # TODO DEVELOPMENT
     print('---------------- RUNNING OPF ON FINAL SCOPF BASECASE ---------------')           # PRINT MESSAGE
     if num_overloads > 0:                                                                   # IF NOT ALL OVERLOADS PROCESSED...
         print('ITERATIONS TIMED OUT !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')       # PRINT MESSAGE
@@ -1547,8 +1551,8 @@ if __name__ == "__main__":
     start_time = time.time()
 
     # -- MAKE SHURE GENERATORS WITH PMAX=0 HAVE PGEN=0 --------------------------------------------
-    for gkey in gen_keyidx:                                                                           # LOOP ACROSS GENERATOR KEYS
-        gidx = gen_keyidx[gkey]                                                                       # GET GENERATOR INDEX
+    for gkey in gen_keyidx:                                                                         # LOOP ACROSS GENERATOR KEYS
+        gidx = gen_keyidx[gkey]                                                                    # GET GENERATOR INDEX
         if net_a.gen.loc[gidx, 'max_p_mw'] == 0.0:                                                  # CHECK IF PMAX=0
             net_a.gen.loc[gidx, 'p_mw'] = 0.0                                                       # SET PGEN=0
 
@@ -1723,8 +1727,6 @@ if __name__ == "__main__":
 
     print('DONE ---------------------------------------------------------------')
     print('TOTAL TIME -------------------------------------------------------->', round(time.time() - master_start_time, 3))
-
-    print('FINALIZE TIME ----------------------------------------------------->', round(time.time() - finalize_time, 3))       # TODO DEVELOPMENT
 
     # == DEVELOPEMENT, COPY FILES FOR EVALUATION -------------------------------------------------- # TODO... Development copy results to directory
     if not sys.argv[1:]:
