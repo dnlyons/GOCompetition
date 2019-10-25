@@ -1445,7 +1445,7 @@ end
 
 ""
 
-@everywhere function post_fixed_pf_nbf_rect2(pm::GenericPowerModel)
+@everywhere function post_fixed_pf_nbf_rect2(pm::AbstractPowerModel)
     start_time = time()
     PowerModels.variable_voltage(pm, bounded=false)
     PowerModels.variable_active_generation(pm, bounded=false)
@@ -1544,7 +1544,7 @@ end
 
 ""
 
-@everywhere function solution_second_stage!(pm::GenericPowerModel, sol::Dict{String,Any})
+@everywhere function solution_second_stage!(pm::AbstractPowerModel, sol::Dict{String,Any})
     PowerModels.add_setpoint_bus_voltage!(sol, pm)
     PowerModels.add_setpoint_generator_power!(sol, pm)
     PowerModels.add_setpoint_branch_flow!(sol, pm)
