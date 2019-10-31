@@ -5,9 +5,7 @@ import math
 import time
 import numpy
 from copy import deepcopy
-
 import pandapower as pp
-from pandas import options as pdoptions
 import data as data_read
 import multiprocessing
 
@@ -42,7 +40,7 @@ if not sys.argv[1:]:
 
     outfname = cwd + '//solution1.txt'
     NetworkModel = network + '  ' + scenario
-    MaxRunningTime = 600
+    MaxRunningTime = 2700
 
 
 # =============================================================================
@@ -237,9 +235,6 @@ def get_okey_pct(xnet, okey, loadingthreshold, onlinegens, gendict, linedict, xf
 
 def run_outage_ac(xnet, okey, onlinegens, gendict, linedict, xfmrdict, loaddict, totalloadp, loadingthreshold, iteration):
     """run powerflow on outage and check for overloads"""
-
-    # screen_loading_pct = min(100.0, loadingthreshold + (1.0 * iteration))
-
     mva_overloads = {okey: []}
     nosolveoutage = []
     net = deepcopy(xnet)                                                                            # get fresh copy of network
@@ -305,12 +300,11 @@ def parallel_run_outage_ac(arglist):
     return results
 
 
-def get_dominant_outages_ac(xnet, outagekeys, onlinegens, gendict, linedict, xfmrdict, loaddict, totalloadp, loadingthreshold, iteration, participatinggens, pwlcostdict0):
+def get_dominant_outages_ac(xnet, outagekeys, onlinegens, gendict, linedict, xfmrdict, loaddict, totalloadp, loadingthreshold, basegencost, iteration):
     """get dominant outages resulting in branch loading, calls run_outages for multiprocessing"""
 
     mva_overloads_dict = {}                                                                         # declare dict
     nosolveoutages = []                                                                             # declare dict
-    basegencost = round(get_generation_cost(xnet, participatinggens, gendict, pwlcostdict0), 1)     # get total cost of this basecase generation
 
     arglist = [[xnet, x, onlinegens, gendict, linedict, xfmrdict, loaddict, totalloadp,
                 loadingthreshold, iteration] for x in outagekeys]                                   # create argument list for each process
@@ -325,28 +319,34 @@ def get_dominant_outages_ac(xnet, outagekeys, onlinegens, gendict, linedict, xfm
 
     # -- NEW METHOD WITH WEIGHTED OVERLOADS -------------------------------------------------------
     dominantoutages = []
-    dominantoutagescost = []                                                                    # initialize list
+    dominantoutagescost = []                                                                        # initialize list
 
     for okey in mva_overloads_dict:                                                                 # loop across outage keys
         outagecosts = numpy.interp(mva_overloads_dict[okey], [-1e6, 0.0, 0.01, 2.0, 2.01, 50.0, 50.01, 1e6], [0.0, 0.0, 1e3, 1e3, 5e3, 5e3, 1e6, 1e6])  # get list of costs of overloads
         totaloutagecost = sum(outagecosts)
-        dominantoutagescost.append([totaloutagecost, okey])                                      # add the total cost and outage key to list
-    dominantoutagescost.sort(reverse=True)                                                      # sort largest to smallest cost
+        dominantoutagescost.append([totaloutagecost, okey])                                         # add the total cost and outage key to list
+    dominantoutagescost.sort(reverse=True)                                                          # sort largest to smallest cost
 
-    overloadcosts = []                                                                              # initialize list
-    totaloverloadcosts = []                                                                         # initialize list
-    for data in dominantoutagescost:                                                            # loop through the overload cost outages list
-        overloadcosts.append(int(data[0]))                                                          # add cost for this outage to list
+    numoverloads = 0                                                                                # initialize number of overloads
+    loadingcosts = []                                                                               # initialize list
+    totalloadingcosts = []                                                                          # initialize list
+    for data in dominantoutagescost:                                                                # loop through the overload cost outages list
         dominantoutages.append(data[1])                                                             # add outage key to list
-        totaloverloadcosts.append(int(basegencost + data[0]))                                       # add generator cost + outage cost to list
+        if data[0] > 1e-4:                                                                          # if overload for this outage...
+            numoverloads += 1                                                                       # increment number of overloads
+            loadingcosts.append(int(data[0]))                                                       # add cost for this outage to list
+            totalloadingcosts.append(int(basegencost + data[0]))                                    # add generator cost + outage cost to list
+        else:                                                                                       # if no overload for this outage...
+            loadingcosts.append('-')                                                                # add placeholder for cost for this outage to list
+            totalloadingcosts.append('-')                                                           # add placeholder for generator cost + outage cost to list
 
     print()
     print('{0:<2d}  DOMINANT OUTAGES'.format(iteration), dominantoutages[:10], '+ [{0:d}]'.format(max(0, len(dominantoutages) - 10)))
-    print('{0:<2d}     BASE GEN COST'.format(iteration), basegencost)
-    print('{0:<2d}    OVERLOAD COSTS'.format(iteration), overloadcosts[:10], '+ [{0:d}]'.format(max(0, len(overloadcosts) - 10)))
-    print('{0:<2d}       TOTAL COSTS'.format(iteration), totaloverloadcosts[:10], '+ [{0:d}]'.format(max(0, len(totaloverloadcosts) - 10)))
+    print('{0:<2d}     BASE GEN COST'.format(iteration), round(basegencost, 1))
+    # print('{0:<2d}    OVERLOAD COSTS'.format(iteration), loadingcosts[:10], '+ [{0:d}]'.format(max(0, len(loadingcosts) - 10)))
+    print('{0:<2d}       TOTAL COSTS'.format(iteration), totalloadingcosts[:10], '+ [{0:d}]'.format(max(0, len(totalloadingcosts) - 10)))
 
-    return dominantoutages, nosolveoutages
+    return dominantoutages, numoverloads, nosolveoutages
 
 
 def arghelper2(args):
@@ -1100,8 +1100,8 @@ if __name__ == "__main__":
         solve_starttime = time.time()                                                               # INITIALIZE START-TIME
         pp.runopp(net, init='pf')                                                                   # RUN OPF ON THIS NETWORK
         # pp.runopp(net, init='pf', OPF_VIOLATION=1e-4, PDIPM_COSTTOL=1e-4, PDIPM_GRADTOL=1e-4)     # RUN OPF ON THIS NETWORK
-        opf_solvetime = time.time() - solve_starttime                                               # CALCULATE OPF SOLVE TIME
-        print('   OPTIMAL POWERFLOW SOLVED ........................................', round(opf_solvetime, 2))
+        opf_time = time.time() - solve_starttime                                               # CALCULATE OPF SOLVE TIME
+        print('   OPTIMAL POWERFLOW SOLVED ........................................', round(opf_time, 2))
         net_a = copy_opf_to_network(net, net_a, gen_keyidx, genbus_dict, swingbus, swsh_keyidx,
                                     swshbus_dict, ext_grid_idx)                                     # COPY OPF RESULTS TO THIS NETWORK
         pp.runpp(net_a, enforce_q_lims=True)                                                        # RUN POWERFLOW ON NETA
@@ -1111,8 +1111,8 @@ if __name__ == "__main__":
         solve_starttime = time.time()                                                               # INITIALIZE START-TIME
         pp.runopp(net, init='pf')                                                                   # RUN OPF ON THIS NETWORK
         # pp.runopp(net, init='pf', OPF_VIOLATION=1e-4, PDIPM_COSTTOL=1e-4, PDIPM_GRADTOL=1e-4)     # RUN OPF ON THIS NETWORK
-        opf_solvetime = time.time() - solve_starttime                                               # CALCULATE OPF SOLVE TIME
-        print('   OPTIMAL POWERFLOW SOLVED FIRST ..................................', round(opf_solvetime, 3), 'sec')
+        opf_time = time.time() - solve_starttime                                               # CALCULATE OPF SOLVE TIME
+        print('   OPTIMAL POWERFLOW SOLVED FIRST ..................................', round(opf_time, 3), 'sec')
         net_a = copy_opf_to_network(net, net_a, gen_keyidx, genbus_dict, swingbus, swsh_keyidx,
                                     swshbus_dict, ext_grid_idx)                                     # COPY OPF RESULTS TO THIS NETWORK
         solve_starttime = time.time()                                                               # INITIALIZE START-TIME
@@ -1129,9 +1129,6 @@ if __name__ == "__main__":
     write_gen_results(outfname, gen_results, Gids, genbuses, swshidxs)                              # WRITE SOLUTION1 GEN RESULTS
     # -----------------------------------------------------------------------------------------
     last_known_good_net = deepcopy(net_a)
-    last_known_good_cost = 99e6
-
-
 
     # =============================================================================================
     # -- TRY TO FILTER OUT SOME GENERATOR AND BRANCH OUTAGES  -------------------------------------
@@ -1177,9 +1174,9 @@ if __name__ == "__main__":
     # *********************************************************************************************
     print('-------------------- ATTEMPTING BASECASE SCOPF ---------------------')
     c_net = deepcopy(net_a)                                                                         # GET COPY OF THE RATEA NETWORK
-
     processed_outages = []                                                                          # INITIALIZE LIST OF ALREADY PROCESSED OUTAGES
     nosolve_outages = []
+
     opf_gendata_dict = {}                                                                           # PARALLEL OPF GENERATOR DICT
     pgen_minmax_dict = {}                                                                           # PARALLEL GENERATOR MIN-MAX P CHANGE DICT
     vreg_minmax_dict = {}                                                                           # PARALLEL GENERATOR MIN-MAX VREG CHANGE DICT
@@ -1187,48 +1184,58 @@ if __name__ == "__main__":
 
     gpdelta_threshold = 1.2                                                                         # ESTIMATE HOW MUCH PGEN CHANGE IS SIGNIFICANT
     gvregdelta_threshold = 0.020                                                                    # ESTIMATE HOW MUCH GEN OR SWSHUNT VREG CHANGE IS SIGNIFICANT
-
     num_parallel_outages = 1                                                                        # ASSIGN THE NUMBER OF PARALLEL OUTAGES
 
     # /\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/
     # -- LOOP WHILE THERE ARE REMAINING DOMINANT OUTAGES ------------------------------------------
     # /\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/
     scopf_start_time = time.time()                                                                  # SET THE WHILE LOOP START TIME
-    start_iteration_time = time.time()                                                              # INITIALIZE FIRST START ITERATION TIME
+    start_iteration_time = time.time() - opf_time                                                   # INITIALIZE FIRST START ITERATION TIME
     last_iteration_time = 0.0                                                                       # INITIALIZE TIME FOR EACH WHILE LOOP ITERATION
     max_iteration_time = 0.0                                                                        # INITIALIZE MAXIMUM ITERATION TIME
-    time_to_finalize = opf_solvetime + 60.0                                                         # ESTIMATE THE TIME TO FINALIZE SCOPF BASECASE
+    finalize_time = opf_time + 60.0                                                                 # ESTIMATE THE TIME TO FINALIZE SCOPF BASECASE
     elapsed_time = round(time.time() - master_start_time, 3)                                        # GET THE ELAPSED TIME SO FAR
-    countdown_time = MaxRunningTime - elapsed_time - time_to_finalize                               # INITIALIZE COUNTDOWN TIME
-    dominant_outages = [x for x in outage_keys]                                                     # ASSIGN FIRST SET OF DOMINANT OUTAGES
+
+    countdown_time = MaxRunningTime - elapsed_time - finalize_time                                  # INITIALIZE COUNTDOWN TIME
+    dominant_outages = [x for x in outage_keys]                                                     # INITIALIZE DOMINANT OUTAGES
+    nosolves_reprocessed = False                                                                    # INITIALIZE REPROCESS NOSOLVES FLAG
     step = 0                                                                                        # INITIALIZE ITERATOR
 
     while countdown_time > 0.0:                                                                     # LOOP WHILE TIME REMAINS
         pp.runpp(c_net, enforce_q_lims=True)                                                        # SOLVE THIS MASTER BASECASE
+        if countdown_time < max_iteration_time:                                                     # CHECK IF NOT ENOUGH TIME TO FOR NEXT FULL RUN...
+            break                                                                                   # EXIT AND FINE-TUNE RESULTS SO FAR
         base_gen_data = get_swsh_gen_data(c_net, online_gens + swshkeys, gen_keyidx, swsh_keyidx)   # GET GENERATORS PGEN AND VREG FOR THIS MASTER BASECASE
+        base_gen_cost = get_generation_cost(c_net, participating_gens, gen_keyidx, pwlcost_dict0)   # GET TOTAL COST OF THIS BASECASE GENERATION
 
-        # -- GET DOMINANT OUTAGES RESULTING IN BRANCH LOADING VIOLATIONS --------------------------
-        outage_keys = [x for x in dominant_outages if x not in processed_outages]                   # UPDATE OUTAGE KEYS
+        # -- GET DOMINANT OUTAGES RESULTING IN BRANCH OVERLOADING ---------------------------------
+        overloaded_outages = []                                                                     # ASSUME NO BRANCHES ARE OVERLOADED
+        dominant_outages = [x for x in dominant_outages if x not in processed_outages]              # UPDATE DOMINANT OUTAGE KEYS TO BE PROCESSED
 
-        if outage_keys:                                                                                                 # IF THERE ARE OVERLOADS REMAINING TO BE PROCESSES...
-            dominant_outages, nosolves = get_dominant_outages_ac(c_net, outage_keys, online_gens, gen_keyidx,           # GET DOMINANT GENERATOR AND BRANCH OUTAGES
-                                                                 line_keyidx, xfmr_keyidx, load_keyidx, total_loadp,    # GET DOMINANT GENERATOR AND BRANCH OUTAGES
-                                                                 95.0, step, participating_gens, pwlcost_dict0)         # GET DOMINANT GENERATOR AND BRANCH OUTAGES
-            nosolve_outages += nosolves                                                                                 # ADD ANY NOSOLVE OUTAGE KEYS FOUND
+        if dominant_outages:                                                                        # IF THERE ARE DOMINANT OUTAGES TO BE PROCESSES...
+            dominant_outages, num_overloads, nosolves \
+                = get_dominant_outages_ac(c_net, dominant_outages, online_gens, gen_keyidx,
+                                          line_keyidx, xfmr_keyidx, load_keyidx, total_loadp,
+                                          max(100.0, 95.0 + step), base_gen_cost, step)             # GET DOMINANT GENERATOR AND BRANCH OUTAGES
+            nosolve_outages += nosolves                                                             # ADD ANY NOSOLVE OUTAGE KEYS FOUND
+            overloaded_outages = dominant_outages[:num_overloads]                                   # GET THE OUTAGES RESULTING IN OVERLOADS
 
-        else:                                                                                       # CHECK IF NO MORE OVERLOADS...
-            # todo repeat everything ?
-            if countdown_time > max_iteration_time + 30.0 and nosolve_outages:                      # IF TIME REMAINING AND NOSOLVE OUTAGES FOUND...
-                dominant_outages = [x for x in nosolve_outages]                                     # ASSIGN NOSOLVES TO OUTAGES TO RUN
-                print()
-                print('RUNNING NOSOLVE OUTAGES', nosolve_outages, len(nosolve_outages))             # PRINT STATEMENT
-                nosolve_outages = []                                                                # CLEAR THE NOSOLVE OUTAGES
-                processed_outages = []
-                step += 1                                                                           # INCREMENT ITERATOR
-                continue                                                                            # PROCESS THE NOSOLVE OUTAGES
-            break                                                                                   # BREAK OUT OF WHILE LOOP
+        if not overloaded_outages:                                                                  # CHECK IF NO MORE OVERLOADS...
+            if nosolve_outages and not nosolves_reprocessed:                                        # IF THERE ARE NOSOLVES AND HAVE NOT ATTEMPTED TO PROCESS...
+                nosolves_reprocessed = True                                                         # SET THE SECOND CYCLE FLAG=TRUE
+                if countdown_time > max_iteration_time + 30.0:                                      # IF TIME REMAINING TO START PROCESSING NOSOLVES...
+                    print()                                                                         # PRINT BLANK LINE
+                    print('RUNNING NOSOLVE OUTAGES', nosolve_outages, len(nosolve_outages))         # PRINT MESSAGE
+                    nosolve_outages = list(set(nosolve_outages))
+                    dominant_outages = [x for x in nosolve_outages]                                 # ASSIGN NOSOLVES TO OUTAGES TO RUN
+                    nosolve_outages = []                                                            # CLEAR THE NOSOLVE OUTAGES
+                    processed_outages = []                                                          # CLEAR THE PROCESSED OUTAGES
+                    step += 1                                                                       # INCREMENT ITERATOR
+                    continue                                                                        # START PROCESSING THE NOSOLVE OUTAGES
+            else:
+                break                                                                               # EXIT AND FINE-TUNE RESULTS SO FAR
 
-        o_keys = dominant_outages[:num_parallel_outages]                                            # SET HOW MANY OVERLOADED OUTAGES TO PROCESS
+        o_keys = overloaded_outages[:num_parallel_outages]                                          # SET HOW MANY OVERLOADED OUTAGES TO PROCESS
         last_iteration_time = time.time() - start_iteration_time                                    # CALCULATE THIS ITERATION TIME
         max_iteration_time = max(last_iteration_time, max_iteration_time)                           # CHECK FOR MAX ITERATION TIME
 
@@ -1238,24 +1245,13 @@ if __name__ == "__main__":
         print('{0:<2d}    ITERATION TIME'.format(step), round(last_iteration_time, 1))              # PRINT STATEMENT
         print('{0:<2d}    COUNTDOWN TIME'.format(step), round(countdown_time, 1))                   # PRINT STATEMENT
 
-        if countdown_time < max_iteration_time:                                                     # CHECK IF NOT ENOUGH TIME TO RUN ALL THE OVERLOADS
-            if num_parallel_outages > 1:
-                # todo use average iteration time?
-                num_overloads = int(len(o_keys) * countdown_time / (max_iteration_time))            # CALCULATE HOW MANY CAN BE PROCESSED
-                o_keys = dominant_outages[:num_overloads]                                           # SET HOW MANY OVERLOADED OUTAGES TO PROCESS
-                if num_overloads < 1:                                                               # IF NOT ENOUGH TIME FOR ONE OF THE OVERLOADS...
-                    num_overloads = 99                                                              # SET NUMBER OF OVERLOADS != 0, SO TIMEOUT IS REGOGNIZED
-                    break                                                                           # EXIT WHILE LOOP AND FINALIZE RESULTS SO FAR
-
         # ==========================================================================================
-        # == RUN THE DOMINANT OUTAGES ON THIS BASECASE WITH OPF ====================================
+        # == RUN THE OVERLOADED OUTAGES ON THIS BASECASE WITH OPF ==================================
         # ==========================================================================================
         start_iteration_time = time.time()                                                          # INITIALIZE START ITERATION TIME
-        # ---------------------------------------------------------------------
-        # -- RUN THE OUTAGES ONE AT A TIME (IF NUM_PARALLEL_OUTAGES = 1) ------
-        # ---------------------------------------------------------------------
-        if len(o_keys) == 1:
-            o_key = o_keys[0]
+        # :::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+        if len(o_keys) == 1:                                                                        # IF ONLY ONE OUTAGE IN GROUP... PROCESS IT
+            o_key = o_keys[0]                                                                       # GET THE OUTAGE KEY
             net = deepcopy(c_net)                                                                   # GET FRESH COPY OF THIS MASTER NETWORK
             if o_key in gen_keyidx:                                                                 # CHECK IF A GENERATOR...
                 g_idx = gen_keyidx[o_key]                                                           # GET GENERATOR INDEX
@@ -1271,18 +1267,15 @@ if __name__ == "__main__":
                 pp.runopp(net, init='pf')                                                           # RUN OPF ON THIS NETWORK
             except:                                                                                 # IF NO SOLUTION...
                 print('{0:<2d}  NOSOLVE WITH OPF'.format(step), o_keys, 'REMOVE FROM OUTAGES')      # PRINT NOSOLVE MESSAGE
-                c_net = deepcopy(last_known_good_net)                                               # COPY LAST KNOWN GOOD NET TO CNET
                 processed_outages.append(o_key)                                                     # ADD THIS OUTAGE TO PROCESSED OUTAGES
                 nosolve_outages.append(o_key)                                                       # ADD OUTAGE KEY TO NOSOLVE OUTAGES
                 elapsed_time = time.time() - master_start_time                                      # GET THE ELAPSED TIME SO FAR
-                countdown_time = MaxRunningTime - elapsed_time - time_to_finalize                   # INITIALIZE COUNTDOWN TIME
+                countdown_time = MaxRunningTime - elapsed_time - opf_time - finalize_time           # CALCULATE TIME LEFT
                 step += 1                                                                           # INCREMENT ITERATOR
-                # if countdown_time < 30.0:                                                         # IF CHANCE OF NOT COMPLETING ANOTHER ITERATION...
-                #     break                                                                         # BREAK FROM WHILE LOOP AND FINALIZE
+                c_net = deepcopy(last_known_good_net)                                               # COPY LAST KNOWN GOOD NET TO CNET
                 continue                                                                            # ELSE... GET NEXT DOMINANT OUTAGES
 
             # -- SINCE THIS 'NET' OUTAGE SOLVED WITH OPF ------------------------------------------
-            # todo see if total cost went down
             last_known_good_net = deepcopy(c_net)                                                   # SAVE LAST ITERATION CNET AS LAST KNOW GOOD NET
 
             c_net = copy_opf_to_network(net, c_net, gen_keyidx, genbus_dict, swingbus, swsh_keyidx, swshbus_dict, ext_grid_idx)  # COPY OPF RESULTS TO NEXT CNET
@@ -1327,33 +1320,22 @@ if __name__ == "__main__":
                         c_net.gen.loc[g_idx, 'min_p_mw'] = pgen                                     # SET THIS GENERATOR'S MINIMUM POWER OUTPUT
                     elif pgen - base_pgen < -gpdelta_threshold:                                     # IF THIS GENERATOR DECREASED LESS THAN THIS...
                         c_net.gen.loc[g_idx, 'max_p_mw'] = pgen                                     # SET THIS GENERATOR'S MAXIMUM POWER OUTPUT
-
-                # -- SET GEN OR SWSHUNT VOLTAGE SCHEDULE ----------------------                     # TODO -- vreg adjust seems no real benefit for one at a time
-                # base_gvreg = base_gen_data[g_key][1]                                              # GET THIS GENERATOR'S BASECASE VREG
-                # gvreg = c_net.res_gen.loc[g_idx, 'vm_pu']                                         # GET THIS GENERATOR'S OPF VREG
-                # qgen = c_net.res_gen.loc[g_idx, 'q_mvar']                                         # GET THIS GENERATOR'S OPF QGEN
-                # if gvreg - base_gvreg > gvregdelta_threshold:                                     # IF THIS GENERATOR INCREASED VREG MORE THAN THIS...
-                #     c_net.gen.loc[g_idx, 'min_q_mvar'] = qgen + 0.0001                            # SET THIS GENERATOR'S MINIMUM Q
-                # elif gvreg - base_gvreg < - gvregdelta_threshold:                                 # IF THIS GENERATOR DECREASED VREG LESS THAN THIS...
-                #     c_net.gen.loc[g_idx, 'max_q_mvar'] = qgen - 0.0001                            # SET THIS GENERATOR'S MAXIMUM Q
-
             step += 1                                                                               # INCREMENT ITERATOR
             processed_outages += o_keys                                                             # UPDATE THE PROCESSED OUTAGES
             elapsed_time = time.time() - master_start_time                                          # GET THE ELAPSED TIME SO FAR
-            countdown_time = MaxRunningTime - elapsed_time - time_to_finalize                       # CALCULATE TIME LEFT
+            countdown_time = MaxRunningTime - elapsed_time - opf_time - finalize_time               # CALCULATE TIME LEFT
 
-        # ---------------------------------------------------------------------
-        # -- RUN THE OUTAGES IN PARLLEL (IF NUM_PARALLEL_OUTAGES > 1)----------
-        # ---------------------------------------------------------------------
-        if len(o_keys) > 1:                                                                                     # IF RUNNING OUTAGES IN PARALLEL
-            arglist = [[c_net, x, online_gens, gen_keyidx, line_keyidx, xfmr_keyidx, genbus_dict,               #
-                        swingbus, swsh_keyidx, swshbus_dict, swshkeys, ext_grid_idx, step] for x in o_keys]     # GET ARGUMENT LIST FOR EACH PROCESS
-            results = parallel_run_outage_opf(arglist)                                                          # GET PARALLEL RESULTS {swsh_gkey: [pgen, gvreg, qgen]}
-            for opf_gendata_dict_i in results:                                                                  # LOOP ACROSS THE OUTAGES OPF GENERATOR DICTS
-                opf_gendata_dict.update(opf_gendata_dict_i)                                                     # UPDATE THE MASTER OPF GENERATOR DICT
+        # :::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+        elif len(o_keys) > 1:                                                                         # IF MORE THAN ONE OUTAGE IN GROUP... RUN IN PARALLEL
+            arglist = [[c_net, x, online_gens, gen_keyidx, line_keyidx, xfmr_keyidx,                # GET ARGUMENT LIST FOR EACH PROCESS
+                        genbus_dict, swingbus, swsh_keyidx, swshbus_dict, swshkeys,                 # GET ARGUMENT LIST FOR EACH PROCESS
+                        ext_grid_idx, step] for x in o_keys]                                        # GET ARGUMENT LIST FOR EACH PROCESS
+            results = parallel_run_outage_opf(arglist)                                              # GET PARALLEL RESULTS {swsh_gkey: [pgen, gvreg, qgen]}
+            for opf_gendata_dict_i in results:                                                      # LOOP ACROSS THE OUTAGES OPF GENERATOR DICTS
+                opf_gendata_dict.update(opf_gendata_dict_i)                                         # UPDATE THE MASTER OPF GENERATOR DICT
 
             # -- INITIALIZE GENERATOR P AND VREG CHANGE DICTS -----------------
-            swsh_gkeys = swshkeys + online_gens
+            swsh_gkeys = swshkeys + online_gens                                                     # COMBINE SWSHUNT AND GENERATOR KEYS
             for g_key in swsh_gkeys:                                                                # LOOP ACROSS GENERATORS AND SWSHUNTS
                 if g_key in online_gens:                                                            # IF A GENERATOR...
                     g_idx = gen_keyidx[g_key]                                                       # GET GENERATOR INDEX
@@ -1368,22 +1350,17 @@ if __name__ == "__main__":
 
             # == DETERMINE HOW MUCH THE GENERATORS CHANGED ====================
             solved = True
-            for o_key in opf_gendata_dict:                                                          # LOOP THROUGH THE DOMINANT OUTAGES FROM OPF RESULTS
-
+            for o_key in opf_gendata_dict:                                                          # LOOP THROUGH THE OVERLOADED OUTAGES FROM OPF RESULTS
                 if not opf_gendata_dict[o_key]:                                                     # EMPTY LIST INDICATES NOSOLVE
                     print('NOSLOVE FOUND IN PARALLEL OPF ...........................', o_key)       # PRINT STATEMENT
                     c_net = last_known_good_net                                                     # SINCE NOSOLVE FOUND... LOAD LAST KNOWN GOOD CNET
                     elapsed_time = time.time() - master_start_time                                  # GET THE ELAPSED TIME SO FAR
-                    countdown_time = MaxRunningTime - elapsed_time - time_to_finalize               # CALCULATE TIME LEFT
+                    countdown_time = MaxRunningTime - elapsed_time - opf_time - finalize_time       # CALCULATE TIME LEFT
                     step += 1                                                                       # INCREMENT ITERATOR
                     nosolve_outages.append(o_key)                                                   # ADD OUTAGE TO NOSOLVES
-                    processed_outages += [o_key]                                                    # UPDATE THE PROCESSED OUTAGES
+                    processed_outages.append(o_key)                                                 # UPDATE THE PROCESSED OUTAGES
                     solved = False                                                                  # SET SOLVED FLAG=FALSE
                     break                                                                           # BREAK AND PROCESS NEXT GROUP OF OUTAGES
-
-                # -- SINCE ALL OUTAGES SOLVED ---------------------------------
-                # todo see if total cost went down to set lastknowngood
-                last_known_good_net = deepcopy(c_net)                                               # SAVE THIS CNET AS LAST KNOWN GOOD
 
                 for g_key in opf_gendata_dict[o_key]:                                               # LOOP ACROSS THE ONLINE GENERATORS
                     if g_key == o_key:                                                              # CHECK IF THE OUTAGE WAS THIS GENERATOR...
@@ -1418,7 +1395,10 @@ if __name__ == "__main__":
                     if qgen > qgen_minmax_dict[g_idx][1]:                                           # IF THIS GENERATOR Q IS GREATER THAN LARGEST SO FAR...
                         qgen_minmax_dict[g_idx][1] = qgen                                           # SET THIS GENERATORS MAX Q
             if solved:
-                # --- SET GEMERATORS PGEN AND ADJUST PMIN OR PMAX ---------------------
+                # -- SINCE ALL OUTAGES SOLVED ---------------------------------
+                last_known_good_net = deepcopy(c_net)                                               # SAVE LAST ITERATION CNET AS LAST KNOW GOOD NET
+
+                # --- SET GENERATORS PGEN AND ADJUST PMIN OR PMAX ---------------------
                 gpdelta_data = []                                                                   # INITIALIZE LIST FOR SORTING GENERATOR P CHANGE DATA
                 for g_key in pgen_minmax_dict:                                                      # LOOP THROUGH GEN MIN-MAX CHANGE DICT
                     gpdelta_data.append(pgen_minmax_dict[g_key])                                    # ADD GEN MIN-MAX DATA TO LIST
@@ -1431,13 +1411,14 @@ if __name__ == "__main__":
                     base_pgen = data[2]                                                             # GET THIS GENERATORS PRE-OUTAGE PGEN
                     g_idx = data[3]                                                                 # GET THIS GENERATORS INDEX
                     # -- CHECK FOR PGEN CHANGE IN BOTH DIRECTIONS ---------------------
-                    if gdelta_neg < -gpdelta_threshold and gdelta_pos > gpdelta_threshold:          # CHECK IF THIS GENERATOR BOTH DECREASED AND INCREASED PGEN
-                        pgen_ave = base_pgen + (gdelta_neg + gdelta_pos) / 2                        # CALCULATE THE AVERAGE PGEN
-                        c_net.gen.loc[g_idx, 'p_mw'] = pgen_ave                                     # SET THIS GENERATORS PGEN
-                        c_net.gen.loc[g_idx, 'min_p_mw'] = base_pgen + gdelta_neg                   # SET THIS GENERATORS MINPGEN
-                        c_net.gen.loc[g_idx, 'max_p_mw'] = base_pgen + gdelta_pos                   # SET THIS GENERATORS MAXPGEN
+                    # if gdelta_neg < -gpdelta_threshold and gdelta_pos > gpdelta_threshold:          # CHECK IF THIS GENERATOR BOTH DECREASED AND INCREASED PGEN
+                    #     pgen_ave = base_pgen + (gdelta_neg + gdelta_pos) / 2                        # CALCULATE THE AVERAGE PGEN
+                    #     c_net.gen.loc[g_idx, 'p_mw'] = pgen_ave                                     # SET THIS GENERATORS PGEN
+                    #     c_net.gen.loc[g_idx, 'min_p_mw'] = base_pgen + gdelta_neg                   # SET THIS GENERATORS MINPGEN
+                    #     c_net.gen.loc[g_idx, 'max_p_mw'] = base_pgen + gdelta_pos                   # SET THIS GENERATORS MAXPGEN
                     # -- CHECK FOR PGEN CHANGE DOWN ONLY  -----------------------------
-                    elif gdelta_neg < -gpdelta_threshold and gdelta_pos < gpdelta_threshold:        # CHECK IF THIS GENERATOR ONLY DECREASED PGEN
+                    # elif gdelta_neg < -gpdelta_threshold and gdelta_pos < gpdelta_threshold:        # CHECK IF THIS GENERATOR ONLY DECREASED PGEN
+                    if gdelta_neg < -gpdelta_threshold and gdelta_pos < gpdelta_threshold:          # CHECK IF THIS GENERATOR ONLY DECREASED PGEN
                         c_net.gen.loc[g_idx, 'p_mw'] = base_pgen + gdelta_neg + 1e-6                # SET THIS GENERATORS PGEN
                         c_net.gen.loc[g_idx, 'max_p_mw'] = base_pgen + gdelta_neg                   # SET THIS GENERATORS MAXPGEN
                     # -- CHECK FOR PGEN CHANGE UP ONLY  -------------------------------
@@ -1475,23 +1456,23 @@ if __name__ == "__main__":
                         c_net.gen.loc[g_idx, 'vm_pu'] = base_gvreg + gvreg_pos - 0.0005             # SET THIS GENERATORS VREG
                         c_net.gen.loc[g_idx, 'min_q_mvar'] = qgen_minmax_dict[g_idx][0] + 1e-6      # SET THIS GENERATORS QMIN
 
-                pp.runpp(c_net, enforce_q_lims=True)                                                # SOLVE THIS MASTER BASECASE
-                try:
-                    pp.runopp(c_net, init='pf')                                                     # RUN OPF ON THIS NEW BASECASE NETWORK
-                except:
-                    print('GROUP DID NOT SOLVE .... GET NEXT GROUP OF CONTINGENCIES')
-                    c_net = deepcopy(last_known_good_net)
-                    processed_outages += o_keys                                                     # UPDATE THE PROCESSED OUTAGES
-                    elapsed_time = time.time() - master_start_time                                  # GET THE ELAPSED TIME SO FAR
-                    countdown_time = MaxRunningTime - elapsed_time - time_to_finalize               # CALCULATE TIME LEFT
-                    step += 1                                                                       # INCREMENT ITERATOR
-                    continue
-
-                c_net = copy_opf_to_network(c_net, c_net, gen_keyidx, genbus_dict, swingbus,        #
-                                            swsh_keyidx, swshbus_dict, ext_grid_idx)                # COPY OPF RESULTS TO THIS NETWORK
+                # pp.runpp(c_net, enforce_q_lims=True)                                                # SOLVE THIS MASTER BASECASE
+                # try:
+                #     pp.runopp(c_net, init='pf')                                                     # RUN OPF ON THIS NEW BASECASE NETWORK
+                # except:
+                #     print('GROUP DID NOT SOLVE .... GET NEXT GROUP OF CONTINGENCIES')
+                #     processed_outages += o_keys                                                     # UPDATE THE PROCESSED OUTAGES
+                #     nosolve_outages += o_keys
+                #     elapsed_time = time.time() - master_start_time                                  # GET THE ELAPSED TIME SO FAR
+                #     countdown_time = MaxRunningTime - elapsed_time - opf_time - finalize_time       # CALCULATE TIME LEFT
+                #     step += 1                                                                       # INCREMENT ITERATOR
+                #     c_net = deepcopy(last_known_good_net)
+                #     continue
+                # c_net = copy_opf_to_network(c_net, c_net, gen_keyidx, genbus_dict, swingbus,        #
+                #                             swsh_keyidx, swshbus_dict, ext_grid_idx)                # COPY OPF RESULTS TO THIS NETWORK
                 processed_outages += o_keys                                                         # UPDATE THE PROCESSED OUTAGES
                 elapsed_time = time.time() - master_start_time                                      # GET THE ELAPSED TIME SO FAR
-                countdown_time = MaxRunningTime - elapsed_time - time_to_finalize                   # CALCULATE TIME LEFT
+                countdown_time = MaxRunningTime - elapsed_time - opf_time - finalize_time           # CALCULATE TIME LEFT
                 step += 1                                                                           # INCREMENT ITERATOR
 
     # /\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/
@@ -1503,10 +1484,8 @@ if __name__ == "__main__":
     # =============================================================================================
     print()
     print('---------------- RUNNING OPF ON FINAL SCOPF BASECASE ---------------')                   # PRINT MESSAGE
-    if outage_keys:                                                                                 # IF NOT ALL OVERLOADS PROCESSED...
-        print('ITERATIONS TIMED OUT !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')               # PRINT MESSAGE
-        # todo get last known good ?
-
+    if overloaded_outages:                                                                          # IF NOT ALL OVERLOADS PROCESSED...
+        print('ITERATIONS TIMED OUT  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')               # PRINT MESSAGE
     a_net = deepcopy(c_net)                                                                         # COPY LAST OPF BASECASE NETWORK TO FINAL SCOPF BASECASE
     pp.runpp(a_net, enforce_q_lims=True)                                                            # SOLVE THIS FINAL BASECASE
     try:
@@ -1517,8 +1496,8 @@ if __name__ == "__main__":
         pp.runpp(a_net, enforce_q_lims=True)                                                        # SOLVE THIS FINAL BASECASE
         pp.runopp(a_net, init='pf')                                                                 # RUN OPF ON THIS NETWORK
 
-    net_a = copy_opf_to_network(a_net, net_a, gen_keyidx, genbus_dict, swingbus, swsh_keyidx, swshbus_dict, ext_grid_idx)  # <---- THIS IS THE FINAL SCOPF BASECASE
-    pp.runpp(net_a, enforce_q_lims=True)                                                            # SOLVE THIS FINAL BASECASE
+    net_a = copy_opf_to_network(a_net, net_a, gen_keyidx, genbus_dict, swingbus, swsh_keyidx, swshbus_dict, ext_grid_idx)   # <---- THIS IS THE FINAL SCOPF BASECASE
+    pp.runpp(net_a, enforce_q_lims=True)                                                                                    # SOLVE THIS FINAL BASECASE
 
     min_busvoltage, max_busvoltage = get_minmax_voltage(net_a)                                      # GET MIN-MAX BASECASE BUS VOLTAGES
     min_busvoltage = round(min_busvoltage, 5)                                                       # FORMAT MIN VOLTAGE
